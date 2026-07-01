@@ -258,10 +258,7 @@ class People {
 
         for (int step = 0; step < speed; step++) {
             int[] nextPos = computeSmartPath();
-            if (nextPos == null) {
-                randomMove(1);
-                break;
-            }
+            if(nextPos == null)break;//must means no fire detected
 
             if (nextPos[0] != this.z) {
                 this.targetStage = (Stage) space.building[nextPos[0]][nextPos[1]][nextPos[2]];
@@ -289,22 +286,26 @@ class People {
             }
         }
 
-        // 【新增：人物自身 3x3 與樓梯的局部視野】彌補感測器盲區
-        for (int ldy = -1; ldy <= 1; ldy++) {
-            for (int ldx = -1; ldx <= 1; ldx++) {
-                int ny = y + ldy, nx = x + ldx;
-                if (space.isValid(z, ny, nx)) {
-                    Obj localObj = space.building[z][ny][nx];
-                    int lKey = bitKey(z, ny, nx);
-                    if (localObj.fire) {
-                        knownFires.add(lKey);
-                        knownHazards.add(lKey);
-                    } else if (localObj.smoke > 0.2) {
-                        knownHazards.add(lKey);
-                    }
-                }
+        // 【新增：人物真實視距與樓梯的局部視野】彌補感測器盲區，改用 computeVisibleCells()
+        Set<String> visibleCells = computeVisibleCells();
+        for (String vKey : visibleCells) {
+            String[] tokens = vKey.split(",");
+            int vz = Integer.parseInt(tokens[0]);
+            int vy = Integer.parseInt(tokens[1]);
+            int vx = Integer.parseInt(tokens[2]);
+            
+            Obj localObj = space.building[vz][vy][vx];
+            int lKey = bitKey(vz, vy, vx);
+            
+            if (localObj.fire) {
+                knownFires.add(lKey);
+                knownHazards.add(lKey);
+            } else if (localObj.smoke > 0.2) {
+                knownHazards.add(lKey);
             }
         }
+        
+        // 保留樓梯視野：因為 computeVisibleCells() 只掃描同樓層平面
         if (space.building[z][y][x] instanceof Stage) {
             Stage st = (Stage) space.building[z][y][x];
             for (Stage nextSt : new Stage[]{st.upfloor, st.downfloor}) {
