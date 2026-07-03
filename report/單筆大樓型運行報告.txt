@@ -1,0 +1,22 @@
+無系統生還率：
+total: 552, survive: 7
+Default Average Survival Rate: 0.012681159420289856
+
+有系統生還率：
+total: 552, survive: 546
+Smart Average Survival Rate: 0.9891304347826086
+
+Average Optimization Degree (Ticks per person): 96.47101449275362
+
+運行時間：2026/7/3 19:22:35~19:31:17，共8分鐘42秒
+
+樓型資訊：樓高10層、面積50*50、人數552
+
+console完整內容：
+it:0
+total: 552, survive: 7
+total: 552, survive: 546
+bug: 0
+Default Average Survival Rate: 0.012681159420289856
+Smart Average Survival Rate: 0.9891304347826086
+Average Optimization Degree (Ticks per person): 96.47101449275362
