@@ -9,7 +9,7 @@ class sim {
         //輸入:模擬次數、樓高範圍、樓寬範圍、樓長範圍
         //輸出:平均存活時間、最終數據報告、過程文檔(會隨著模擬次數被覆蓋，只會看到最後一次模擬的文檔)
         //注意事項:時間複雜度超大，不建議輸入大於1000000立方單位的房子(這個數字是樂觀估計，實際上越小越好)
-        s.work(1,new Range(10,11),new Range(30,31),new Range(30,31));
+        s.work(1000,new Range(1,2),new Range(10,20),new Range(10,20));
     }
 }
 // ─── 基礎物件 ────────────────────────────────────────────────
@@ -327,18 +327,26 @@ class People {
             }
         }
 
-        // 階段一：安全路徑 BFS
-        Queue<Integer> queue = new LinkedList<>();
-        Map<Integer, Integer> parentMap = new HashMap<>();
-        Set<Integer> visited = new HashSet<>();
-
+        // 階段一：帶危險權重的最短路徑 (Dijkstra)
+        // 「出口權重」＝每走一步的基礎成本；「危險權重」＝離威脅越近，該格的額外成本越高
+        // 不再對 knownHazards 直接 continue（硬性封路），改成加成本，讓演算法自己權衡「繞路」vs「冒險走近路」
         int startKey = bitKey(z, y, x);
-        queue.add(startKey);
-        visited.add(startKey);
+        Map<Integer, Double> bestCost = new HashMap<>();
+        Map<Integer, Integer> parentMap = new HashMap<>();
+        PriorityQueue<double[]> pq = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+
+        bestCost.put(startKey, 0.0);
+        pq.add(new double[]{0.0, startKey});
         Integer targetPosKey = null;
 
-        while (!queue.isEmpty()) {
-            int currKey = queue.poll();
+        while (!pq.isEmpty()) {
+            double[] top = pq.poll();
+            double currCost = top[0];
+            int currKey = (int) top[1];
+
+            // 過期節點（已經有更便宜的路徑更新過這格），跳過
+            if (currCost > bestCost.getOrDefault(currKey, Double.MAX_VALUE)) continue;
+
             int[] c = decodeKey(currKey);
             Obj currObj = space.building[c[0]][c[1]][c[2]];
 
@@ -352,28 +360,35 @@ class People {
                 int nz = c[0], ny = c[1] + dy[i], nx = c[2] + dx[i];
                 if (!space.isValid(nz, ny, nx)) continue;
 
-                int nextKey = bitKey(nz, ny, nx);
-                if (visited.contains(nextKey)) continue;
-
                 Obj nextObj = space.building[nz][ny][nx];
-                if (!isPassable(nextObj)) continue;
-                if (knownHazards.contains(nextKey)) continue; 
+                if (!isPassable(nextObj)) continue; // 真火/真牆/被封的門仍然是絕對禁止，不能用權重換
 
-                visited.add(nextKey);
-                parentMap.put(nextKey, currKey);
-                queue.add(nextKey);
+                int nextKey = bitKey(nz, ny, nx);
+                double moveCost = EXIT_STEP_WEIGHT + dangerCost(nz, ny, nx, knownFires, knownHazards);
+                double newCost = currCost + moveCost;
+
+                if (newCost < bestCost.getOrDefault(nextKey, Double.MAX_VALUE)) {
+                    bestCost.put(nextKey, newCost);
+                    parentMap.put(nextKey, currKey);
+                    pq.add(new double[]{newCost, nextKey});
+                }
             }
 
             if (currObj instanceof Stage) {
                 Stage s = (Stage) currObj;
                 for (Stage next : new Stage[]{s.upfloor, s.downfloor}) {
                     if (next == null) continue;
+                    if (!isPassable(next)) continue; // 樓梯本身已經真的著火才禁止
+
                     int nextKey = bitKey(next.z, next.y, next.x);
-                    if (visited.contains(nextKey) || knownHazards.contains(nextKey)) continue;
-                    
-                    visited.add(nextKey);
-                    parentMap.put(nextKey, currKey);
-                    queue.add(nextKey);
+                    double moveCost = EXIT_STEP_WEIGHT + dangerCost(next.z, next.y, next.x, knownFires, knownHazards);
+                    double newCost = currCost + moveCost;
+
+                    if (newCost < bestCost.getOrDefault(nextKey, Double.MAX_VALUE)) {
+                        bestCost.put(nextKey, newCost);
+                        parentMap.put(nextKey, currKey);
+                        pq.add(new double[]{newCost, nextKey});
+                    }
                 }
             }
         }
@@ -390,94 +405,97 @@ class People {
         return maximizeSurvivalTime(knownFires, knownHazards);
     }
 
-    private int[] maximizeSurvivalTime(Set<Integer> knownFires, Set<Integer> knownHazards) {
-        if (knownFires.isEmpty()) return null;
+    // ────────────────────────────────────────────────────────
+    // 危險成本計算：距離越近，懲罰越高（反距離加權）
+    // 真火 (knownFires) 給比普通危險 (knownHazards，例如濃煙警報) 更高的權重
+    // ────────────────────────────────────────────────────────
+    private static final double EXIT_STEP_WEIGHT = 0.0;   // 每走一步、朝出口前進的基礎成本
+    private static final double DANGER_WEIGHT = 0.5;     // 一般危險（感測器濃煙警報）的權重
+    private static final double FIRE_EXTRA_WEIGHT = 5.0; // 真實火源的額外權重（比普通危險更嚴重）
 
-        Map<Integer, Integer> fireDist = new HashMap<>();
-        PriorityQueue<int[]> pq = new PriorityQueue<>(Comparator.comparingInt(a -> a[1]));
-
+    private double dangerCost(int cz, int cy, int cx, Set<Integer> knownFires, Set<Integer> knownHazards) {
+        double cost = 0.0;
         for (int fKey : knownFires) {
-            pq.add(new int[]{fKey, 0});
-            fireDist.put(fKey, 0);
+            int[] f = decodeKey(fKey);
+            int dist = Math.abs(cz - f[0]) * 100 + Math.abs(cy - f[1]) + Math.abs(cx - f[2]);
+            cost += FIRE_EXTRA_WEIGHT / (1.0 + dist);
         }
-
-        int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
-
-        while (!pq.isEmpty()) {
-            int[] curr = pq.poll();
-            int currKey = curr[0], cDist = curr[1];
-
-            if (cDist > fireDist.getOrDefault(currKey, Integer.MAX_VALUE)) continue;
-
-            int[] c = decodeKey(currKey);
-            Obj currObj = space.building[c[0]][c[1]][c[2]];
-            
-            // 平面 Dijkstra 擴展
-            for (int i = 0; i < 4; i++) {
-                int nz = c[0], ny = c[1] + dy[i], nx = c[2] + dx[i];
-                if (!space.isValid(nz, ny, nx)) continue;
-
-                Obj nextObj = space.building[nz][ny][nx];
-                if (nextObj instanceof Wall) continue;
-
-                int weight = (nextObj instanceof Door) ? 2 : 1;
-                int newDist = cDist + weight;
-
-                int nKey = bitKey(nz, ny, nx);
-                if (newDist < fireDist.getOrDefault(nKey, Integer.MAX_VALUE)) {
-                    fireDist.put(nKey, newDist);
-                    pq.add(new int[]{nKey, newDist});
-                }
-            }
-            
-            // 【新增：立體 Dijkstra 擴展 (上下樓)】
-            if (currObj instanceof Stage) {
-                Stage st = (Stage) currObj;
-                for (Stage nextSt : new Stage[]{st.upfloor, st.downfloor}) {
-                    if (nextSt == null) continue; // 移除 instanceof Wall 的判斷
-                    int weight = 5; // 上下樓較花體力，距離權重設高一點
-                    int newDist = cDist + weight;
-                    int nKey = bitKey(nextSt.z, nextSt.y, nextSt.x);
-                    if (newDist < fireDist.getOrDefault(nKey, Integer.MAX_VALUE)) {
-                        fireDist.put(nKey, newDist);
-                        pq.add(new int[]{nKey, newDist});
-                    }
-                }
-            }
+        for (int hKey : knownHazards) {
+            if (knownFires.contains(hKey)) continue; // 避免真火的格子被算兩次
+            int[] h = decodeKey(hKey);
+            int dist = Math.abs(cz - h[0]) * 100 + Math.abs(cy - h[1]) + Math.abs(cx - h[2]);
+            cost += DANGER_WEIGHT / (1.0 + dist);
         }
+        return cost;
+    }
 
-        int maxDist = -1;
+    private int[] maximizeSurvivalTime(Set<Integer> knownFires, Set<Integer> knownHazards) {
+        // 【修正漏洞 1】優先躲避火源；如果目前沒發現火，則全力躲避有濃煙的感測器，絕不輕易放棄
+        Set<Integer> threats = knownFires.isEmpty() ? knownHazards : knownFires;
+        
+        // 如果全地圖的感測器都完美安全（防呆安全機制），才回傳 null
+        if (threats.isEmpty()) return null;
+
+        int maxManhattanDist = -1;
         int[] bestMove = null;
 
-        // 1. 評估平面 4 個方向的安全性
+        // 【修正漏洞 2】首先評估「留在原地」的安全距離
+        int myMinDist = Integer.MAX_VALUE;
+        for (int tKey : threats) {
+            int[] t = decodeKey(tKey);
+            // 曼哈頓距離計算 (Z軸跨樓層給予 100 倍高權重)
+            int mDist = Math.abs(this.z - t[0]) * 100 + Math.abs(this.y - t[1]) + Math.abs(this.x - t[2]);
+            if (mDist < myMinDist) myMinDist = mDist;
+        }
+        // 預設將「留在原地」設為目前最佳解
+        maxManhattanDist = myMinDist;
+        bestMove = new int[]{this.z, this.y, this.x};
+
+        // 評估四周相鄰 4 個格子
+        int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
         for (int i = 0; i < 4; i++) {
             int ny = y + dy[i], nx = x + dx[i];
             if (!space.isValid(z, ny, nx)) continue;
 
             Obj nextObj = space.building[z][ny][nx];
-            if (!isPassable(nextObj)) continue;
+            if (!isPassable(nextObj)) continue; // 撞牆或踩火則跳過
 
-            int nKey = bitKey(z, ny, nx);
-            int dist = fireDist.getOrDefault(nKey, 9999);
+            int minDistToThreat = Integer.MAX_VALUE;
+            for (int tKey : threats) {
+                int[] t = decodeKey(tKey);
+                int mDist = Math.abs(this.z - t[0]) * 100 + Math.abs(ny - t[1]) + Math.abs(nx - t[2]);
+                if (mDist < minDistToThreat) {
+                    minDistToThreat = mDist;
+                }
+            }
 
-            if (dist > maxDist) {
-                maxDist = dist;
+            // 只有當移動過去「能離危險源更遠」時，才更新移動決策
+            if (minDistToThreat > maxManhattanDist) {
+                maxManhattanDist = minDistToThreat;
                 bestMove = new int[]{z, ny, nx};
             }
         }
-        
-        // 2. 【新增：評估逃往上下樓的安全性】
+
+        // 評估跨樓層（如果人剛好踩在樓梯 Stage 上，檢查上下樓是否能帶來巨大安全感）
         Obj currentObj = space.building[z][y][x];
         if (currentObj instanceof Stage) {
-            Stage st = (Stage) currentObj;
-            for (Stage nextSt : new Stage[]{st.upfloor, st.downfloor}) {
-                if (nextSt != null && isPassable(nextSt)) {
-                    int nKey = bitKey(nextSt.z, nextSt.y, nextSt.x);
-                    int dist = fireDist.getOrDefault(nKey, 9999);
-                    if (dist > maxDist) {
-                        maxDist = dist;
-                        bestMove = new int[]{nextSt.z, nextSt.y, nextSt.x};
+            Stage s = (Stage) currentObj;
+            for (Stage nextStage : new Stage[]{s.upfloor, s.downfloor}) {
+                if (nextStage == null) continue;
+                if (!isPassable(nextStage)) continue;
+
+                int minDistToThreat = Integer.MAX_VALUE;
+                for (int tKey : threats) {
+                    int[] t = decodeKey(tKey);
+                    int mDist = Math.abs(nextStage.z - t[0]) * 100 + Math.abs(nextStage.y - t[1]) + Math.abs(nextStage.x - t[2]);
+                    if (mDist < minDistToThreat) {
+                        minDistToThreat = mDist;
                     }
+                }
+
+                if (minDistToThreat > maxManhattanDist) {
+                    maxManhattanDist = minDistToThreat;
+                    bestMove = new int[]{nextStage.z, nextStage.y, nextStage.x};
                 }
             }
         }
@@ -810,6 +828,13 @@ public class Simulator {
         return null;
     }
 
+    // 自身煙霧的每 tick 遞迴成長函式：a_n = f(a_n-1)
+    // f(x) = |sin(x - pi/2)|^0.68 + 1
+    // 註：sin(x - pi/2) = -cos(x)，在 x∈[0,1] 恆為負值；負底數配非整數指數在實數域無意義，故取絕對值再開次方
+    static double smokeGrowth(double x) {
+        return Math.pow(Math.abs(Math.sin(x - Math.PI / 2)), 0.68) + 1.0;
+    }
+
     static void spreadEnvironment() {
         int height = space.height, rows = space.rows, cols = space.cols;
         int[] dyFire = {-1, 1, 0, 0}, dxFire = {0, 0, -1, 1};
@@ -824,21 +849,26 @@ public class Simulator {
             for (int y = 0; y < rows; y++) {
                 for (int x = 0; x < cols; x++) {
                     if (space.building[z][y][x].smoke > 0.0) {
-                        nextSmoke[z][y][x] += 0.05; 
-                        
-                        for (int dy = -2; dy <= 2; dy++) {
-                            for (int dx = -2; dx <= 2; dx++) {
+                        // 自身煙霧成長：a_n = f(a_n-1)，f(x) = |sin(x - pi/2)|^0.68 + 1
+                        // sin(x - pi/2) 在 x∈[0,1] 恆為負值，負數開 0.68 次方在實數域無定義，故取絕對值避免 NaN
+                        nextSmoke[z][y][x] = smokeGrowth(space.building[z][y][x].smoke);
+
+                        for (int dy = -3; dy <= 3; dy++) {
+                            for (int dx = -3; dx <= 3; dx++) {
                                 int dist = Math.abs(dy) + Math.abs(dx);
-                                if (dist == 0 || dist > 2) continue; 
+                                if (dist == 0 || dist > 3) continue; 
 
                                 int ny = y + dy, nx = x + dx;
                                 if (space.isValid(z, ny, nx)) {
                                     Obj next = space.building[z][ny][nx];
-                                    if (!(next instanceof Wall) && !(next instanceof Exit)) {
+                                    // 只往「目前完全沒有煙霧」的格子擴散（用擴散前的原始煙霧值判斷）
+                                    if (!(next instanceof Wall) && !(next instanceof Exit) && next.smoke == 0.0) {
                                         if (dist == 1) {
-                                            nextSmoke[z][ny][nx] += 0.2; 
+                                            nextSmoke[z][ny][nx] += 0.3;
                                         } else if (dist == 2) {
-                                            nextSmoke[z][ny][nx] += 0.1; 
+                                            nextSmoke[z][ny][nx] += 0.2;
+                                        } else if (dist == 3) {
+                                            nextSmoke[z][ny][nx] += 0.1;
                                         }
                                     }
                                 }
@@ -980,7 +1010,7 @@ public class Simulator {
     static int[] run(boolean useSmart, int totalPeople) {
         int dead = 0, survive = 0;
         int[] survivalTimes = new int[totalPeople]; // 紀錄每個人的存活時間 (索引 0 對應 id 1)
-
+        printMap();
         while (!isBuildingFullyOnFire()) {
             tick++;
             spreadEnvironment();
@@ -1006,6 +1036,7 @@ public class Simulator {
             }
             peopleList.removeAll(removed);
             printMap();
+            
         }
         
         // 針對逃出或建築物燒毀時仍活著的人，以最終的 tick 為其存活時間
