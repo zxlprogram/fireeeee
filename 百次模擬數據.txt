@@ -1,303 +1,304 @@
 it:0
-total: 11, survive: 0
-total: 11, survive: 0
+total: 168, survive: 0
+total: 168, survive: 127
 it:1
-total: 141, survive: 0
-total: 141, survive: 1
+total: 14, survive: 0
+total: 14, survive: 8
 it:2
-total: 15, survive: 0
-total: 15, survive: 1
+total: 6, survive: 0
+total: 6, survive: 6
 it:3
-total: 12, survive: 1
-total: 12, survive: 8
+total: 1, survive: 0
+total: 1, survive: 1
 it:4
-total: 116, survive: 0
-total: 116, survive: 10
+total: 241, survive: 2
+total: 241, survive: 240
 it:5
-total: 7, survive: 0
-total: 7, survive: 0
+total: 12, survive: 0
+total: 12, survive: 8
 it:6
-total: 82, survive: 0
-total: 82, survive: 5
+total: 124, survive: 3
+total: 124, survive: 111
 it:7
-total: 197, survive: 3
-total: 197, survive: 52
+total: 138, survive: 5
+total: 138, survive: 126
 it:8
-total: 84, survive: 0
-total: 84, survive: 1
+total: 3, survive: 0
+total: 3, survive: 0
 it:9
-total: 66, survive: 1
-total: 66, survive: 6
+total: 24, survive: 1
+total: 24, survive: 19
 it:10
-total: 8, survive: 0
-total: 8, survive: 0
+total: 18, survive: 5
+total: 18, survive: 18
 it:11
-total: 22, survive: 0
-total: 22, survive: 0
+total: 13, survive: 0
+total: 13, survive: 0
 it:12
-total: 175, survive: 1
-total: 175, survive: 111
+total: 92, survive: 0
+total: 92, survive: 8
 it:13
-total: 41, survive: 1
-total: 41, survive: 4
+total: 27, survive: 2
+total: 27, survive: 13
 it:14
-total: 259, survive: 0
-total: 259, survive: 1
+total: 2, survive: 1
+total: 2, survive: 1
 it:15
-total: 23, survive: 2
-total: 23, survive: 3
+total: 43, survive: 1
+total: 43, survive: 36
 it:16
-total: 11, survive: 0
-total: 11, survive: 0
+total: 1, survive: 0
+total: 1, survive: 1
 it:17
-total: 103, survive: 2
-total: 103, survive: 17
+total: 68, survive: 0
+total: 68, survive: 63
 it:18
-total: 117, survive: 1
-total: 117, survive: 3
-it:19
-total: 20, survive: 2
-total: 20, survive: 14
-it:20
-total: 42, survive: 0
-total: 42, survive: 2
-it:21
-total: 160, survive: 2
-total: 160, survive: 99
-it:22
-total: 18, survive: 0
-total: 18, survive: 3
-it:23
-total: 25, survive: 0
-total: 25, survive: 2
-it:24
-total: 49, survive: 1
-total: 49, survive: 9
-it:25
-total: 12, survive: 0
-total: 12, survive: 2
-it:26
-total: 175, survive: 2
-total: 175, survive: 51
-it:27
-total: 32, survive: 2
-total: 32, survive: 22
-it:28
-total: 153, survive: 3
-total: 153, survive: 9
-it:29
-total: 99, survive: 1
-total: 99, survive: 7
-it:30
-total: 1, survive: 0
-total: 1, survive: 0
-it:31
-total: 74, survive: 0
-total: 74, survive: 6
-it:32
-total: 80, survive: 3
-total: 80, survive: 50
-it:33
-total: 1, survive: 0
-total: 1, survive: 0
-it:34
-total: 11, survive: 1
-total: 11, survive: 6
-it:35
-total: 189, survive: 1
-total: 189, survive: 21
-it:36
-total: 75, survive: 1
-total: 75, survive: 4
-it:37
-total: 1, survive: 0
-total: 1, survive: 0
-it:38
-total: 28, survive: 2
-total: 28, survive: 19
-it:39
-total: 124, survive: 0
-total: 124, survive: 0
-it:40
-total: 79, survive: 1
-total: 79, survive: 31
-it:41
-total: 17, survive: 0
-total: 17, survive: 0
-it:42
-total: 6, survive: 0
-total: 6, survive: 0
-it:43
-total: 152, survive: 2
-total: 152, survive: 18
-it:44
-total: 108, survive: 0
-total: 108, survive: 12
-it:45
-total: 226, survive: 0
-total: 226, survive: 14
-it:46
-total: 31, survive: 0
-total: 31, survive: 1
-it:47
-total: 6, survive: 0
-total: 6, survive: 0
-it:48
-total: 280, survive: 0
-total: 280, survive: 1
-it:49
-total: 131, survive: 5
-total: 131, survive: 67
-it:50
-total: 94, survive: 3
-total: 94, survive: 38
-it:51
-total: 4, survive: 0
-total: 4, survive: 0
-it:52
-total: 19, survive: 3
-total: 19, survive: 5
-it:53
-total: 312, survive: 1
-total: 312, survive: 6
-it:54
-total: 20, survive: 0
-total: 20, survive: 0
-it:55
-total: 172, survive: 1
-total: 172, survive: 12
-it:56
-total: 7, survive: 2
-total: 7, survive: 3
-it:57
-total: 12, survive: 0
-total: 12, survive: 0
-it:58
-total: 32, survive: 0
-total: 32, survive: 0
-it:59
-total: 39, survive: 1
-total: 39, survive: 2
-it:60
-total: 49, survive: 1
-total: 49, survive: 1
-it:61
-total: 166, survive: 2
-total: 166, survive: 7
-it:62
-total: 5, survive: 0
-total: 5, survive: 0
-it:63
-total: 491, survive: 4
-total: 491, survive: 21
-it:64
-total: 217, survive: 0
-total: 217, survive: 12
-it:65
-total: 119, survive: 0
-total: 119, survive: 28
-it:66
-total: 51, survive: 0
-total: 51, survive: 1
-it:67
-total: 143, survive: 3
-total: 143, survive: 24
-it:68
-total: 28, survive: 0
-total: 28, survive: 0
-it:69
-total: 302, survive: 6
-total: 302, survive: 115
-it:70
-total: 5, survive: 0
-total: 5, survive: 0
-it:71
-total: 26, survive: 1
-total: 26, survive: 2
-it:72
-total: 36, survive: 1
-total: 36, survive: 5
-it:73
-total: 35, survive: 6
-total: 35, survive: 29
-it:74
-total: 9, survive: 0
-total: 9, survive: 4
-it:75
-total: 129, survive: 0
-total: 129, survive: 7
-it:76
-total: 248, survive: 0
-total: 248, survive: 81
-it:77
 total: 8, survive: 0
-total: 8, survive: 2
-it:78
-total: 74, survive: 0
-total: 74, survive: 4
-it:79
-total: 14, survive: 1
-total: 14, survive: 2
-it:80
-total: 34, survive: 1
-total: 34, survive: 1
-it:81
-total: 1, survive: 0
-total: 1, survive: 0
-it:82
-total: 390, survive: 1
-total: 390, survive: 15
-it:83
-total: 36, survive: 1
-total: 36, survive: 2
-it:84
-total: 128, survive: 1
-total: 128, survive: 9
-it:85
-total: 103, survive: 0
-total: 103, survive: 32
-it:86
-total: 59, survive: 0
-total: 59, survive: 8
-it:87
-total: 33, survive: 0
+total: 8, survive: 8
+it:19
+total: 118, survive: 10
+total: 118, survive: 111
+it:20
+total: 45, survive: 0
+total: 45, survive: 27
+it:21
+total: 9, survive: 0
+total: 9, survive: 1
+it:22
+total: 244, survive: 1
+total: 244, survive: 36
+it:23
+total: 151, survive: 4
+total: 151, survive: 149
+it:24
+total: 52, survive: 0
+total: 52, survive: 52
+it:25
+total: 228, survive: 1
+total: 228, survive: 186
+it:26
+total: 82, survive: 1
+total: 82, survive: 82
+it:27
+total: 100, survive: 1
+total: 100, survive: 41
+it:28
+total: 69, survive: 0
+total: 69, survive: 66
+it:29
+total: 4, survive: 0
+total: 4, survive: 2
+it:30
+total: 152, survive: 0
+total: 152, survive: 95
+it:31
+total: 92, survive: 4
+total: 92, survive: 77
+it:32
+total: 5, survive: 1
+total: 5, survive: 2
+it:33
+total: 36, survive: 0
+total: 36, survive: 36
+it:34
+total: 82, survive: 2
+total: 82, survive: 25
+it:35
+total: 98, survive: 1
+total: 98, survive: 96
+it:36
+total: 15, survive: 0
+total: 15, survive: 7
+it:37
+total: 31, survive: 1
+total: 31, survive: 30
+it:38
 total: 33, survive: 1
-it:88
-total: 149, survive: 0
-total: 149, survive: 14
-it:89
-total: 143, survive: 3
-total: 143, survive: 57
-it:90
-total: 224, survive: 0
-total: 224, survive: 30
-it:91
-total: 167, survive: 0
-total: 167, survive: 79
-it:92
-total: 20, survive: 0
-total: 20, survive: 5
-it:93
-total: 338, survive: 3
-total: 338, survive: 30
-it:94
-total: 81, survive: 3
-total: 81, survive: 9
-it:95
-total: 74, survive: 0
-total: 74, survive: 1
-it:96
-total: 154, survive: 0
-total: 154, survive: 6
-it:97
-total: 27, survive: 0
-total: 27, survive: 3
-it:98
-total: 35, survive: 0
-total: 35, survive: 1
-it:99
+total: 33, survive: 30
+it:39
+total: 243, survive: 1
+total: 243, survive: 242
+it:40
+total: 20, survive: 1
+total: 20, survive: 20
+it:41
+total: 4, survive: 0
+total: 4, survive: 2
+it:42
+total: 58, survive: 1
+total: 58, survive: 58
+it:43
+total: 10, survive: 0
+total: 10, survive: 0
+it:44
+total: 301, survive: 1
+total: 301, survive: 217
+it:45
+total: 4, survive: 1
+total: 4, survive: 1
+it:46
+total: 197, survive: 2
+total: 197, survive: 151
+it:47
+total: 7, survive: 0
+total: 7, survive: 6
+it:48
+total: 136, survive: 5
+total: 136, survive: 136
+it:49
+total: 67, survive: 5
+total: 67, survive: 67
+it:50
+total: 157, survive: 0
+total: 157, survive: 84
+it:51
+total: 3, survive: 0
+total: 3, survive: 1
+it:52
+total: 105, survive: 0
+total: 105, survive: 2
+it:53
+total: 78, survive: 1
+total: 78, survive: 53
+it:54
+total: 52, survive: 0
+total: 52, survive: 51
+it:55
 total: 19, survive: 1
+total: 19, survive: 3
+it:56
+total: 9, survive: 0
+total: 9, survive: 1
+it:57
+total: 11, survive: 0
+total: 11, survive: 7
+it:58
+total: 28, survive: 0
+total: 28, survive: 24
+it:59
+total: 39, survive: 0
+total: 39, survive: 39
+it:60
+total: 2, survive: 0
+total: 2, survive: 1
+it:61
+total: 220, survive: 4
+total: 220, survive: 220
+it:62
+total: 3, survive: 0
+total: 3, survive: 0
+it:63
+total: 135, survive: 4
+total: 135, survive: 106
+it:64
+total: 4, survive: 0
+total: 4, survive: 0
+it:65
+total: 41, survive: 0
+total: 41, survive: 41
+it:66
+total: 2, survive: 0
+total: 2, survive: 0
+it:67
+total: 17, survive: 0
+total: 17, survive: 4
+it:68
+total: 19, survive: 1
+total: 19, survive: 12
+it:69
+total: 33, survive: 1
+total: 33, survive: 27
+it:70
+total: 3, survive: 0
+total: 3, survive: 1
+it:71
+total: 20, survive: 6
+total: 20, survive: 16
+it:72
+total: 168, survive: 0
+total: 168, survive: 136
+it:73
+total: 205, survive: 0
+total: 205, survive: 204
+it:74
+total: 126, survive: 2
+total: 126, survive: 111
+it:75
+total: 39, survive: 0
+total: 39, survive: 38
+it:76
+total: 7, survive: 0
+total: 7, survive: 0
+it:77
+total: 25, survive: 0
+total: 25, survive: 0
+it:78
+total: 10, survive: 0
+total: 10, survive: 2
+it:79
+total: 121, survive: 14
+total: 121, survive: 120
+it:80
+total: 12, survive: 0
+total: 12, survive: 12
+it:81
+total: 10, survive: 2
+total: 10, survive: 9
+it:82
+total: 275, survive: 0
+total: 275, survive: 33
+it:83
+total: 212, survive: 0
+total: 212, survive: 67
+it:84
+total: 2, survive: 0
+total: 2, survive: 0
+it:85
+total: 1, survive: 0
+total: 1, survive: 0
+it:86
+total: 194, survive: 1
+total: 194, survive: 45
+it:87
+total: 95, survive: 5
+total: 95, survive: 94
+it:88
+total: 13, survive: 1
+total: 13, survive: 5
+it:89
+total: 26, survive: 0
+total: 26, survive: 16
+it:90
+total: 95, survive: 0
+total: 95, survive: 84
+it:91
+total: 10, survive: 3
+total: 10, survive: 9
+it:92
+total: 37, survive: 2
+total: 37, survive: 32
+it:93
+total: 325, survive: 2
+total: 325, survive: 238
+it:94
+total: 24, survive: 1
+total: 24, survive: 12
+it:95
+total: 10, survive: 0
+total: 10, survive: 2
+it:96
+total: 307, survive: 6
+total: 307, survive: 307
+it:97
+total: 144, survive: 1
+total: 144, survive: 50
+it:98
+total: 125, survive: 3
+total: 125, survive: 103
+it:99
 total: 19, survive: 0
-Default Average Survival Rate: 0.018655500313782346
-Smart Average Survival Rate: 0.15637705742870722
-Average Optimization Degree (Ticks per person): 5.733751509442869
+total: 19, survive: 8
+bug: 14
+Default Average Survival Rate: 0.0332911612273351
+Smart Average Survival Rate: 0.6296724078122261
+Average Optimization Degree (Ticks per person): 31.704556147698135
