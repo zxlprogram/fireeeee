@@ -9,7 +9,7 @@ class sim {
         //輸入:模擬次數、樓高範圍、樓寬範圍、樓長範圍
         //輸出:平均逃脫所需時間、首次正確決策時間、最終數據報告、過程文檔(會隨著模擬次數被覆蓋，只會看到最後一次模擬的文檔)
         //注意事項:時間複雜度超大，不建議輸入大於1000000立方單位的房子(這個數字是樂觀估計，實際上越小越好)
-        s.work(100,new Range(1,11),new Range(5,51),new Range(5,51));
+        s.work(10,new Range(1,11),new Range(5,51),new Range(5,51));
     }
 }
 // ─── 基礎物件 ────────────────────────────────────────────────
@@ -152,6 +152,18 @@ class People {
  boolean everRerouted = false;               // 原定路線(樓梯/通道)在移動前失效，是否曾被迫重新規劃
  int rerouteAttempts = 0;                    // 總共被迫重新規劃路線的次數
  Integer reportedTrappedTick = null;         // 系統端最早得知此人「受困/卡住」位置的tick
+
+ // ─── 【新增】建議生命週期(發布 / 到期 / 撤回) ──────────────────
+ // 過去 SmartEscape 每 tick 都直接重算路徑，等於「建議」沒有真正的存在時間；
+ // 這裡改成：系統對某人下達「前往某個樓梯間」的建議時，視為「發布」一筆建議，
+ // 記錄發布時間與有效期限；當環境改變(目標樓梯間著火)或超過有效期限仍未執行，
+ // 就視為「撤回」，並追蹤撤回後到「拿到下一筆可執行建議」總共花了幾個tick。
+ Integer adviceIssuedTick = null;      // 目前這筆建議的發布時間
+ Integer adviceValidUntilTick = null;  // 這筆建議的有效期限(tick)，超過視為過期
+ Stage adviceTargetStage = null;       // 這筆建議當初指向的目標樓梯間
+ Integer adviceRevokedTick = null;     // 建議被撤回(環境改變或過期)的那個tick，null代表目前沒有「待補建議」的空窗
+ Integer revokeToRerouteTicks = null;  // 【KPI】撤回後到完成改道(拿到下一筆建議)所花的tick數；整場模擬只記錄第一次撤回事件
+ private static final int ADVICE_VALIDITY_TICKS = 8; // 建議有效期限：超過這麼多tick仍未執行完成，系統視為建議已過期
 
  // 【修改】建構子：傳入 profile，並根據屬性自動決定速度與 CO 閾值
  public People(int id, int z, int y, int x, Space space, PersonProfile profile) {
@@ -625,10 +637,16 @@ class People {
      updatePanic();
 
      if (targetStage != null) {
-         if (targetStage.fire) {
-             // 原定樓梯間路線失效，取消目標，下個tick重新規劃改道
-             System.out.println("[REROUTE][SMART] tick=" + currentTick
+         boolean expired = adviceValidUntilTick != null && currentTick > adviceValidUntilTick;
+         if (targetStage.fire || expired) {
+             // 【建議撤回】環境改變(目標樓梯間著火)或建議已過期未執行，視為系統主動撤回這筆建議，
+             // 下個tick重新規劃改道；記錄撤回時間，用於統計「撤回後多久才拿到新建議」
+             if (adviceRevokedTick == null) adviceRevokedTick = currentTick;
+             System.out.println("[ADVICE-REVOKE][SMART] tick=" + currentTick
                  + " id=" + id
+                 + " reason=" + (targetStage.fire ? "ENV_CHANGE" : "EXPIRED")
+                 + " issuedTick=" + adviceIssuedTick
+                 + " validUntilTick=" + adviceValidUntilTick
                  + " pos=(" + z + "," + y + "," + x + ")"
                  + " selfSmoke=" + String.format("%.2f", space.building[z][y][x].smoke)
                  + " selfFire=" + space.building[z][y][x].fire
@@ -636,11 +654,15 @@ class People {
                  + " targetSmoke=" + String.format("%.2f", targetStage.smoke)
                  + " rerouteAttempts(before)=" + rerouteAttempts);
              targetStage = null;
+             adviceTargetStage = null;
+             adviceIssuedTick = null;
+             adviceValidUntilTick = null;
              rerouteAttempts++;
              everRerouted = true;
          } else {
              this.z = targetStage.z; this.y = targetStage.y; this.x = targetStage.x;
              targetStage = null;
+             adviceTargetStage = null; adviceIssuedTick = null; adviceValidUntilTick = null; // 建議已成功執行完畢，生命週期結束
              checkStatus();
              if (isDead || isEscaped) return;
          }
@@ -700,6 +722,15 @@ class People {
 
         if (nextPos[0] != this.z) {
             this.targetStage = (Stage) space.building[nextPos[0]][nextPos[1]][nextPos[2]];
+            // 【建議發布】系統對此人下達「前往此樓梯間」的建議，記錄發布時間與有效期限
+            adviceTargetStage = this.targetStage;
+            adviceIssuedTick = currentTick;
+            adviceValidUntilTick = currentTick + ADVICE_VALIDITY_TICKS;
+            if (adviceRevokedTick != null) {
+                // 【KPI】從撤回到拿到下一筆可執行建議的延遲，只記錄本人第一次撤回事件
+                if (revokeToRerouteTicks == null) revokeToRerouteTicks = currentTick - adviceRevokedTick;
+                adviceRevokedTick = null;
+            }
             Simulator.stageAssignCount++; // 【新增】追蹤「跨樓層目標指派」次數，是改道事件的前提
             break;
          } else {
@@ -1017,7 +1048,15 @@ public class Simulator {
 	    ARSON,      // 縱火：使用了助燃劑，火跟煙都很快
 	    ACCIDENTAL  // 一般意外(預設)：正常的擴散速度
 	}
-	
+
+    // 【新增】三種比較情境：
+    //   DEFAULT - 沒有智慧系統，純靠個人直覺逃生
+    //   SMART   - 只有「決策支援」：系統給建議，人是否服從仍取決於連線/服從率/恐慌
+    //   HYBRID  - 「決策支援 + 備援控制」：除了給建議，系統在偵測到危險時也會主動操作環境
+    //             (自動關閉未關緊的防火門、局部啟動排煙/抑制煙霧擴散)，即使人沒有服從建議，
+    //             環境本身也因為系統的備援控制而變得比較安全
+    enum SimMode { DEFAULT, SMART, HYBRID }
+
     static Space space;
     static int surviveTime=5000;//活過5000時刻就算被救活，之後要改成滅火行動
     static List<People> peopleList = new ArrayList<>();
@@ -1029,24 +1068,8 @@ public class Simulator {
     static FireCause currentCause = FireCause.ACCIDENTAL;
     static Random random = new Random();
 
-    // 更新結算變數
-    static double DTotalserviveP = 0; // Default生還率累加值
-    static double STotalserviveP = 0; // Smart生還率累加值
-
-    static double DHighSmokeP = 0;  // Default 進入高煙區比例累加值
-    static double SHighSmokeP = 0;  // Smart   進入高煙區比例累加值
-    static double DCriticalCOP = 0; // Default 臨界CO暴露比例累加值
-    static double SCriticalCOP = 0; // Smart   臨界CO暴露比例累加值
     static double TotalAccuracySum = 0; // 總體準確率累加值
     static long TotalPeopleSum = 0; // 跨迭代的總人數累計
-
-    // ─── 新增KPI累加值 ───────────────────────────────────────────
-    static double DWrongRouteP = 0, SWrongRouteP = 0; // 錯誤決策後誤入危險路線比例累加值(分母固定是totalPeople，每場都有意義)
-
-    // 以下幾項「不是每場模擬都會發生」(例如沒人需要改道、沒有需優先協助對象)，
-    // 所以額外用一個計數器記錄「有意義的場次數」，最後除以這個計數器而不是總場次，避免被沒發生的場次拉低平均
-    static double DRerouteSuccessSum = 0, SRerouteSuccessSum = 0;
-    static int    DRerouteIterCount = 0,  SRerouteIterCount = 0;
 
     // ─── 【新增】改道成功率除錯用計數器 ───────────────────────────
     // 每次 run() 開始時歸零。記錄本場模擬中「有多少次被指派跨樓層目標(Stage)」，
@@ -1056,21 +1079,47 @@ public class Simulator {
     // 的情況從未發生過，要去看火勢蔓延到Stage的時機/機率是否合理。
     static int stageAssignCount = 0;
 
-    static double DVulnerableIdSum = 0, SVulnerableIdSum = 0;
-    static int    DVulnerableIterCount = 0, SVulnerableIterCount = 0;
+    // ─── 【新增】B2情境專用：備援控制是否啟用、以及本場模擬觸發了幾次主動控制動作 ───
+    static boolean activeControlEnabled = false; // 只有 HYBRID 模式會設為 true
+    static int activeControlActionCount = 0;     // 本場模擬中，系統主動關閉防火門/啟動排煙的次數
 
-    static double DAvgEscapeTickSum = 0, SAvgEscapeTickSum = 0;
-    static int    DEscapeTickIterCount = 0, SEscapeTickIterCount = 0;
-
-    static double DAvgDecisionTickSum = 0, SAvgDecisionTickSum = 0;
-    static int    DDecisionTickIterCount = 0, SDecisionTickIterCount = 0;
-
-    static double DAvgTrappedReportSum = 0, SAvgTrappedReportSum = 0;
-    static int    DTrappedReportIterCount = 0, STrappedReportIterCount = 0;
+    // ─── 【修改】ASET(可用安全逃生時間)追蹤 ───────────────────────
+    // 原本用「整棟建築陷入危險的樓地板面積比例」來近似ASET，但建築動輒上千格、
+    // 煙又是指數成長，20%面積門檻通常十幾個tick就達到，而人要走完整棟樓的
+    // avgEscapeTick(RSET)往往是幾十~幾百tick，兩者尺度完全不對等，算出來的
+    // 「安全餘裕」幾乎必定是很大的負值，沒有反映系統是否真的有幫助。
+    // 改用消防工程更常見的定義：ASET = 逃生「出口本身」開始變得不可用(著火/濃煙)的那個tick，
+    // 因為出口一旦失去可用性，不管走廊多安全，逃生行動實質上都已經失敗。
+    // 若整場模擬出口自始至終都沒被威脅到，代表逃生容量始終充足，asetTick維持null，
+    // 不計入安全餘裕平均(而不是硬湊一個數字)。
+    static Integer asetTick = null;
+    static List<int[]> exitCellsCache = new ArrayList<>(); // 本場模擬的所有Exit格座標，run()開始時重建一次
+    static List<int[]> exitApproachCellsCache = new ArrayList<>(); // 【新增】出口+其四方向鄰接格，供ASET判定「逃生路徑是否已不可通行」使用
 
     // 新增狀態暫存變數，用於判定環境是否已無變化
     static double lastSmokeSum = -1;
     static int lastFireCount = -1;
+
+    // ─── 【新增】各情境(DEFAULT/SMART/HYBRID)的統計累加容器 ───────
+    // 「不是每場模擬都會發生」的KPI(改道、弱勢辨識、ASET等)額外用 *IterCount 只對「有意義的場次」取平均，
+    // 避免被沒發生該事件的場次拉低。
+    static class ModeStats {
+        double totalSurviveP = 0, highSmokeP = 0, criticalCOP = 0, wrongRouteP = 0;
+        double rerouteSuccessSum = 0; int rerouteIterCount = 0;
+        double vulnerableIdSum = 0; int vulnerableIterCount = 0;
+        double avgEscapeTickSum = 0; int escapeTickIterCount = 0;
+        double avgDecisionTickSum = 0; int decisionTickIterCount = 0;
+        double avgTrappedReportSum = 0; int trappedReportIterCount = 0;
+        double revokeToRerouteSum = 0; int revokeToRerouteIterCount = 0;   // 建議撤回→改道完成 延遲
+        double asetSum = 0; int asetIterCount = 0;                        // ASET
+        double safetyMarginSum = 0; int safetyMarginIterCount = 0;        // ASET − RSET(avgEscapeTick)
+        double activeControlActionSum = 0;                                // 平均每場主動控制動作次數(僅HYBRID有意義)
+    }
+    static Map<SimMode, ModeStats> statsByMode = new LinkedHashMap<>();
+    static {
+        for (SimMode m : SimMode.values()) statsByMode.put(m, new ModeStats());
+    }
+
 
     static Obj[][][] cloneBuilding(Obj[][][] src) {
         int h = src.length, r = src[0].length, c = src[0][0].length;
@@ -1370,6 +1419,40 @@ public class Simulator {
             }
         }
 
+        // ─── 【新增】B2情境：決策支援 + 備援控制 ─────────────────────
+        // 系統除了給人建議之外，偵測到附近有危險時也會主動操作環境：
+        //   1) 自動關閉「本來沒關好」的防火門，讓它恢復阻絕火勢延燒的能力
+        //   2) 局部啟動排煙/抑制手段，讓整體煙霧增長率打折扣(模擬機械排煙/灑水)
+        // 這一段跟人員是否服從建議完全無關，即使沒人聽從系統建議，環境本身也會因為
+        // 備援控制而比純「決策支援」情境更安全，藉此跟B1(只有建議)做出差異化。
+        if (activeControlEnabled) {
+            for (int z = 0; z < height; z++) {
+                for (int y = 0; y < rows; y++) {
+                    for (int x = 0; x < cols; x++) {
+                        Obj cell = space.building[z][y][x];
+                        if (!(cell instanceof FireDoor)) continue;
+                        FireDoor fd = (FireDoor) cell;
+                        if (!fd.isOpen) continue;
+
+                        boolean nearbyDanger = false;
+                        for (int dy = -2; dy <= 2 && !nearbyDanger; dy++) {
+                            for (int dx = -2; dx <= 2 && !nearbyDanger; dx++) {
+                                int ny = y + dy, nx = x + dx;
+                                if (!space.isValid(z, ny, nx)) continue;
+                                Obj near = space.building[z][ny][nx];
+                                if (near.fire || near.smoke > 0.5) nearbyDanger = true;
+                            }
+                        }
+                        if (nearbyDanger) {
+                            fd.isOpen = false; // 系統主動關門，恢復防火門應有的阻絕效果
+                            activeControlActionCount++;
+                        }
+                    }
+                }
+            }
+            smokeMultiplier *= 0.85; // 局部排煙/抑制手段，讓整體煙霧增長打折扣
+        }
+
         double[][][] nextSmoke = new double[height][rows][cols];
         for (int z = 0; z < height; z++)
             for (int y = 0; y < rows; y++)
@@ -1559,6 +1642,7 @@ public class Simulator {
         boolean[] isVulnerableProfile;  // 此人本身是否屬於「行動不便/年長者」這類需優先協助對象
         int[] firstDecisionTick;      // 第一次做出有依據決策的tick，-1代表整場模擬都沒有
         int[] reportedTrappedTick;    // 系統端最早得知此人受困位置的tick，-1代表系統始終不知道
+        int[] revokeToRerouteTicks;   // 【新增】建議被撤回後到拿到下一筆建議所花的tick，-1代表本人從未發生撤回
 
         SimResult(int n) {
             times = new int[n];
@@ -1572,9 +1656,11 @@ public class Simulator {
             isVulnerableProfile = new boolean[n];
             firstDecisionTick = new int[n];
             reportedTrappedTick = new int[n];
+            revokeToRerouteTicks = new int[n];
             Arrays.fill(outcomes, Outcome.TRAPPED); // 預設：模擬結束時還沒死也還沒逃出去
             Arrays.fill(firstDecisionTick, -1);
             Arrays.fill(reportedTrappedTick, -1);
+            Arrays.fill(revokeToRerouteTicks, -1);
         }
     }
 
@@ -1592,10 +1678,44 @@ public class Simulator {
         result.isVulnerableProfile[idx] = (p.profile == PersonProfile.IMPAIRED || p.profile == PersonProfile.ELDERLY);
         result.firstDecisionTick[idx] = (p.firstCorrectDecisionTick != null) ? p.firstCorrectDecisionTick : -1;
         result.reportedTrappedTick[idx] = (p.reportedTrappedTick != null) ? p.reportedTrappedTick : -1;
+        result.revokeToRerouteTicks[idx] = (p.revokeToRerouteTicks != null) ? p.revokeToRerouteTicks : -1;
     }
 
     // 將 run 修改為回傳每個人的生存時間陣列，並且準確記錄他們的真實結局與暴露統計
-    static SimResult run(boolean useSmart, int totalPeople) {
+    static SimResult run(SimMode mode, int totalPeople) {
+        boolean useSmart = (mode != SimMode.DEFAULT); // SMART與HYBRID都使用SmartEscape(決策支援)
+        activeControlEnabled = (mode == SimMode.HYBRID); // 只有HYBRID額外啟用備援控制
+        activeControlActionCount = 0;
+        asetTick = null; // 【新增】每場模擬重新歸零，ASET是「本場」出口第一次變得不可用的tick
+
+        // 【新增】重建本場模擬的Exit座標快取；建築結構在單場模擬中不會變，只需算一次
+        exitCellsCache = new ArrayList<>();
+        for (int z = 0; z < space.height; z++) {
+            for (int y = 0; y < space.rows; y++) {
+                for (int x = 0; x < space.cols; x++) {
+                    if (space.building[z][y][x] instanceof Exit) {
+                        exitCellsCache.add(new int[]{z, y, x});
+                    }
+                }
+            }
+        }
+
+        // 【修改】ASET判定範圍：出口本身在煙火擴散邏輯中被設計為永遠不會著火/積煙(見spreadEnvironment
+        // 第1475、1520行對Exit的排除)，若只看出口那一格，asetTick永遠算不出來。
+        // 改用「出口 + 其四方向鄰接格(逃生路徑抵達出口前的最後一步)」來近似ASET，
+        // 只要抵達出口的路被封死(鄰接格著火或濃煙>0.7)，即視為出口已經失能，
+        // 這樣不需要更動原本的煙火擴散邏輯，也更貼近消防工程上「逃生路徑不可通行」的ASET定義。
+        exitApproachCellsCache = new ArrayList<>();
+        int[] dyApproach = {0, -1, 1, 0, 0}, dxApproach = {0, 0, 0, -1, 1}; // 含出口自身(0,0)與上下左右
+        for (int[] e : exitCellsCache) {
+            for (int i = 0; i < dyApproach.length; i++) {
+                int ny = e[1] + dyApproach[i], nx = e[2] + dxApproach[i];
+                if (space.isValid(e[0], ny, nx)) {
+                    exitApproachCellsCache.add(new int[]{e[0], ny, nx});
+                }
+            }
+        }
+
         int survive = 0;
         SimResult result = new SimResult(totalPeople);
         stageAssignCount = 0; // 【新增】每場模擬重新歸零，避免跟前一場(甚至前一次Default/Smart)累加混在一起
@@ -1604,6 +1724,21 @@ public class Simulator {
         while (!isEnvironmentStable() && tick < surviveTime) {
             tick++;
             spreadEnvironment();
+
+            // 【修改】ASET追蹤：出口本身在spreadEnvironment的煙火擴散邏輯中被設計為永遠不會
+            // 著火/積煙(見該函式對Exit的排除判斷)，因此只看出口那一格本身，asetTick永遠算不出來。
+            // 改成偵測「出口 + 其四方向鄰接格」(即抵達出口前的最後一步)是否陷入危險(著火或濃煙>0.7)，
+            // 只要通往出口的路已經被封死，就視為本場模擬的可用安全逃生時間(ASET)上限；
+            // 若出口與其周邊自始至終都安全，asetTick維持null
+            if (asetTick == null) {
+                for (int[] e : exitApproachCellsCache) {
+                    Obj cellObj = space.building[e[0]][e[1]][e[2]];
+                    if (cellObj.fire || cellObj.smoke > 0.7) {
+                        asetTick = tick;
+                        break;
+                    }
+                }
+            }
 
             for (Detector d : detectors) {
                 d.update(space.building, random);
@@ -1641,6 +1776,7 @@ public class Simulator {
         long escapeTickSum = 0, escapeTickN = 0;
         long decisionTickSum = 0, decisionTickN = 0;
         long trappedReportSum = 0, trappedReportN = 0;
+        long revokeToRerouteSum = 0, revokeToRerouteN = 0;
 
         for (int i = 0; i < totalPeople; i++) {
             if (result.enteredHighSmoke[i]) highSmokeCount++;
@@ -1666,6 +1802,10 @@ public class Simulator {
                 trappedReportSum += result.reportedTrappedTick[i];
                 trappedReportN++;
             }
+            if (result.revokeToRerouteTicks[i] >= 0) {
+                revokeToRerouteSum += result.revokeToRerouteTicks[i];
+                revokeToRerouteN++;
+            }
         }
 
         double wrongRouteRate    = (double) wrongRouteCount / totalPeople;
@@ -1674,15 +1814,20 @@ public class Simulator {
         double avgEscapeTick     = (escapeTickN > 0) ? (double) escapeTickSum / escapeTickN : -1;
         double avgDecisionTick   = (decisionTickN > 0) ? (double) decisionTickSum / decisionTickN : -1;
         double avgTrappedReport  = (trappedReportN > 0) ? (double) trappedReportSum / trappedReportN : -1;
+        double avgRevokeToReroute = (revokeToRerouteN > 0) ? (double) revokeToRerouteSum / revokeToRerouteN : -1;
 
-        // 【新增】改道成功率專用除錯log：直接印到stderr，每一場(Default/Smart各一次)都會顯示，
+        // ASET−RSET安全餘裕：ASET改用「出口是否還可用」判定，RSET用avgEscapeTick近似，
+        // 只有本場「出口真的被威脅過」且「有人成功逃脫」時才算安全餘裕，避免湊出沒有意義的數字
+        Double safetyMargin = (asetTick != null && avgEscapeTick >= 0) ? (asetTick - avgEscapeTick) : null;
+
+        // 【新增】改道成功率專用除錯log：直接印到stderr，每一場(Default/Smart/Hybrid各一次)都會顯示，
         // 不必再去開 defaultResult.txt / smartResult.txt 才看得到。
         // 重點看 stageCrossings：
         //   stageCrossings=0            → 這場模擬根本沒人跨樓層移動，rerouteAttempts=0是正常的，不是bug
         //   stageCrossings>0 但 rerouteAttempts=0 → 有跨樓層，但目標樓梯間從未在「指派後、移動前」那個瞬間著火，
         //                                            要去檢查火勢蔓延到Stage的時機/機率是否合理
         //   rerouteAttempts>0           → 改道事件有觸發，success/fail細節可以對照 [REROUTE-OUTCOME] log
-        System.err.println("[REROUTE-SUMMARY] mode=" + (useSmart ? "SMART" : "DEFAULT")
+        System.err.println("[REROUTE-SUMMARY] mode=" + mode
             + " totalPeople=" + totalPeople
             + " stageCrossings=" + stageAssignCount
             + " rerouteAttempts=" + rerouteAttemptCount
@@ -1690,36 +1835,37 @@ public class Simulator {
             + " rerouteFail=" + (rerouteAttemptCount - rerouteSuccessCount)
             + " rate=" + (rerouteAttemptCount > 0 ? String.format("%.2f%%", rerouteSuccessRate * 100) : "N/A(no reroute occurred this run)"));
 
+        System.err.println("[ASET-RSET] mode=" + mode
+            + " asetTick=" + (asetTick != null ? asetTick : "N/A(exit never compromised)")
+            + " rsetApprox(avgEscapeTick)=" + (avgEscapeTick >= 0 ? String.format("%.2f", avgEscapeTick) : "N/A")
+            + " safetyMargin=" + (safetyMargin != null ? String.format("%.2f", safetyMargin) : "N/A")
+            + " activeControlActions=" + activeControlActionCount);
+
         System.out.println("\n====== 模擬結束內部數據 ======");
-        if(useSmart) {
-            STotalserviveP  += (double)survive / totalPeople;
-            SHighSmokeP     += (double)highSmokeCount / totalPeople;
-            SCriticalCOP    += (double)criticalCOCount / totalPeople;
-            SWrongRouteP    += wrongRouteRate;
-            if (rerouteSuccessRate >= 0) { SRerouteSuccessSum += rerouteSuccessRate; SRerouteIterCount++; }
-            if (vulnerableIdRate  >= 0)  { SVulnerableIdSum   += vulnerableIdRate;  SVulnerableIterCount++; }
-            if (avgEscapeTick     >= 0)  { SAvgEscapeTickSum  += avgEscapeTick;     SEscapeTickIterCount++; }
-            if (avgDecisionTick   >= 0)  { SAvgDecisionTickSum += avgDecisionTick;  SDecisionTickIterCount++; }
-            if (avgTrappedReport  >= 0)  { SAvgTrappedReportSum += avgTrappedReport; STrappedReportIterCount++; }
-        }
-        else {
-            DTotalserviveP  += (double)survive / totalPeople;
-            DHighSmokeP     += (double)highSmokeCount / totalPeople;
-            DCriticalCOP    += (double)criticalCOCount / totalPeople;
-            DWrongRouteP    += wrongRouteRate;
-            if (rerouteSuccessRate >= 0) { DRerouteSuccessSum += rerouteSuccessRate; DRerouteIterCount++; }
-            if (vulnerableIdRate  >= 0)  { DVulnerableIdSum   += vulnerableIdRate;  DVulnerableIterCount++; }
-            if (avgEscapeTick     >= 0)  { DAvgEscapeTickSum  += avgEscapeTick;     DEscapeTickIterCount++; }
-            if (avgDecisionTick   >= 0)  { DAvgDecisionTickSum += avgDecisionTick;  DDecisionTickIterCount++; }
-            if (avgTrappedReport  >= 0)  { DAvgTrappedReportSum += avgTrappedReport; DTrappedReportIterCount++; }
-        }
+        ModeStats stats = statsByMode.get(mode);
+        stats.totalSurviveP  += (double) survive / totalPeople;
+        stats.highSmokeP     += (double) highSmokeCount / totalPeople;
+        stats.criticalCOP    += (double) criticalCOCount / totalPeople;
+        stats.wrongRouteP    += wrongRouteRate;
+        if (rerouteSuccessRate >= 0)  { stats.rerouteSuccessSum += rerouteSuccessRate; stats.rerouteIterCount++; }
+        if (vulnerableIdRate  >= 0)   { stats.vulnerableIdSum   += vulnerableIdRate;   stats.vulnerableIterCount++; }
+        if (avgEscapeTick     >= 0)   { stats.avgEscapeTickSum  += avgEscapeTick;      stats.escapeTickIterCount++; }
+        if (avgDecisionTick   >= 0)   { stats.avgDecisionTickSum += avgDecisionTick;   stats.decisionTickIterCount++; }
+        if (avgTrappedReport  >= 0)   { stats.avgTrappedReportSum += avgTrappedReport; stats.trappedReportIterCount++; }
+        if (avgRevokeToReroute >= 0)  { stats.revokeToRerouteSum += avgRevokeToReroute; stats.revokeToRerouteIterCount++; }
+        if (asetTick != null)         { stats.asetSum += asetTick; stats.asetIterCount++; }
+        if (safetyMargin != null)     { stats.safetyMarginSum += safetyMargin; stats.safetyMarginIterCount++; }
+        stats.activeControlActionSum += activeControlActionCount;
+
         System.err.println("total: "+totalPeople+", survive: "+survive);
         return result;
     }
 
     public void work(int iterations,Range H,Range R,Range C) {
         TotalPeopleSum = 0;
-        double totalWrongDecisionCount = 0; // 統計原本活但系統模擬中死掉的總人數
+
+        double smartWrongDecisionCount = 0;  // SMART比DEFAULT更差的人數（決策支援情境）
+        double hybridWrongDecisionCount = 0; // HYBRID比DEFAULT更差的人數（決策支援+備援控制情境）
 
     	for(int it = 0; it < iterations; it++) {
             System.err.println("it:" + it);
@@ -1761,60 +1907,105 @@ public class Simulator {
                 }
             }
 
-            // 取得每個個體在兩種演算法下的模擬結果（時間 + 真實結局）
-            SimResult defaultResult = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, false, "defaultResult.txt");
-            SimResult smartResult   = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, true, "smartResult.txt");
+            // 取得每個個體在三種情境下的模擬結果（時間 + 真實結局）：
+            //   DEFAULT - 無智慧系統(基準線)
+            //   SMART   - 只有決策支援(B1)
+            //   HYBRID  - 決策支援 + 備援控制(B2)
+            SimResult defaultResult = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.DEFAULT, "defaultResult.txt");
+            SimResult smartResult   = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.SMART,   "smartResult.txt");
+            SimResult hybridResult  = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.HYBRID,  "hybridResult.txt");
 
-            // 統計「系統做錯決定」的人數：定義為「結果比原本更差」
-            //   - 原本(Default)活著逃出去，但系統(Smart)卻讓他死掉 → 明確的錯誤
-            //   - 原本活著逃出去，系統卻讓他一直受困沒逃出 → 也是變差，一併算錯誤
+            // 統計「系統做錯決定」的人數：定義為「結果比原本(DEFAULT)更差」
+            //   - 原本(Default)活著逃出去，但系統情境卻讓他死掉/一直受困 → 明確的錯誤
             // 注意：不能直接比較 times[i] 大小，因為 times[i] 只在「死亡/逃脫當下」才有意義，
-            // 而且 Default 和 Smart 是兩場「各自獨立結束」的模擬，兩邊的 tick 基準點不一樣，
+            // 而且各情境是各自獨立結束的模擬，兩邊的 tick 基準點不一樣，
             // 直接比大小會把「系統救活的人」誤判成「系統做錯決定」。
             for (int i = 0; i < peopleCount; i++) {
                 boolean defaultSurvived = defaultResult.outcomes[i] == Outcome.ESCAPED;
                 boolean smartSurvived   = smartResult.outcomes[i] == Outcome.ESCAPED;
+                boolean hybridSurvived  = hybridResult.outcomes[i] == Outcome.ESCAPED;
 
-                if (defaultSurvived && !smartSurvived) {
-                    totalWrongDecisionCount++;
-                }
+                if (defaultSurvived && !smartSurvived)  smartWrongDecisionCount++;
+                if (defaultSurvived && !hybridSurvived) hybridWrongDecisionCount++;
             }
         }
         
         // 根據定義計算準確率
-        double finalAccuracy = (TotalPeopleSum > 0) ? (totalWrongDecisionCount / TotalPeopleSum) : 0.0;
-        
+        double smartFinalAccuracy  = (TotalPeopleSum > 0) ? (smartWrongDecisionCount  / TotalPeopleSum) : 0.0;
+        double hybridFinalAccuracy = (TotalPeopleSum > 0) ? (hybridWrongDecisionCount / TotalPeopleSum) : 0.0;
 
-        // 【調整輸出報表】依需求移除無關參數，只保留生還率與準確率
+        // 【調整輸出報表】三情境(Default/Smart/Hybrid)並列比較，並新增ASET−RSET安全餘裕
+        String[] labels = {"初始模擬(Default)", "決策支援(Smart)  ", "決策支援+備援控制(Hybrid)"};
+        SimMode[] modes = {SimMode.DEFAULT, SimMode.SMART, SimMode.HYBRID};
+
         System.err.println("\n==============================================");
         System.err.println("                 最終數據報告                 ");
         System.err.println("==============================================");
-        System.err.printf("初始模擬生還率 (Default Survival Rate): %.2f%%\n", (DTotalserviveP / iterations) * 100);
-        System.err.printf("系統模擬生還率 (Smart Survival Rate)  : %.2f%%\n", (STotalserviveP / iterations) * 100);
-        System.err.printf("系統嚴重失誤機率 (System mistake Rate) : %.2f%%\n", finalAccuracy * 100);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            System.err.printf("%s 生還率 : %.2f%%\n", labels[i], (st.totalSurviveP / iterations) * 100);
+        }
+        System.err.printf("系統嚴重失誤機率 (Smart mistake Rate)  : %.2f%%\n", smartFinalAccuracy * 100);
+        System.err.printf("系統嚴重失誤機率 (Hybrid mistake Rate) : %.2f%%\n", hybridFinalAccuracy * 100);
         System.err.println("----------------------------------------------");
-        System.err.printf("初始模擬進入高煙區比例 (Default High-Smoke Rate) : %.2f%%\n", (DHighSmokeP / iterations) * 100);
-        System.err.printf("系統模擬進入高煙區比例 (Smart High-Smoke Rate)   : %.2f%%\n", (SHighSmokeP / iterations) * 100);
-        System.err.printf("初始模擬臨界CO暴露比例 (Default Critical-CO Rate): %.2f%%\n", (DCriticalCOP / iterations) * 100);
-        System.err.printf("系統模擬臨界CO暴露比例 (Smart Critical-CO Rate)  : %.2f%%\n", (SCriticalCOP / iterations) * 100);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            System.err.printf("%s 進入高煙區比例 : %.2f%%\n", labels[i], (st.highSmokeP / iterations) * 100);
+        }
         System.err.println("----------------------------------------------");
-        System.err.printf("初始模擬誤入危險路線比例 (Default Wrong-Route Rate): %.2f%%\n", (DWrongRouteP / iterations) * 100);
-        System.err.printf("系統模擬誤入危險路線比例 (Smart Wrong-Route Rate)  : %.2f%%\n", (SWrongRouteP / iterations) * 100);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            System.err.printf("%s 臨界CO暴露比例 : %.2f%%\n", labels[i], (st.criticalCOP / iterations) * 100);
+        }
         System.err.println("----------------------------------------------");
-        printAvgOrNA("初始模擬改道成功率 (Default Reroute Success Rate)", DRerouteSuccessSum, DRerouteIterCount, true);
-        printAvgOrNA("系統模擬改道成功率 (Smart Reroute Success Rate)  ", SRerouteSuccessSum, SRerouteIterCount, true);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            System.err.printf("%s 誤入危險路線比例 : %.2f%%\n", labels[i], (st.wrongRouteP / iterations) * 100);
+        }
         System.err.println("----------------------------------------------");
-        printAvgOrNA("初始模擬弱勢對象辨識率 (Default Vulnerable-ID Rate)", DVulnerableIdSum, DVulnerableIterCount, true);
-        printAvgOrNA("系統模擬弱勢對象辨識率 (Smart Vulnerable-ID Rate)  ", SVulnerableIdSum, SVulnerableIterCount, true);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 改道成功率", st.rerouteSuccessSum, st.rerouteIterCount, true);
+        }
         System.err.println("----------------------------------------------");
-        printAvgOrNA("初始模擬平均逃脫所需時間 (Default Avg Escape Tick)", DAvgEscapeTickSum, DEscapeTickIterCount, false);
-        printAvgOrNA("系統模擬平均逃脫所需時間 (Smart Avg Escape Tick)  ", SAvgEscapeTickSum, SEscapeTickIterCount, false);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 弱勢對象辨識率", st.vulnerableIdSum, st.vulnerableIterCount, true);
+        }
         System.err.println("----------------------------------------------");
-        printAvgOrNA("初始模擬平均首次正確決策時間 (Default Avg First-Decision Tick)", DAvgDecisionTickSum, DDecisionTickIterCount, false);
-        printAvgOrNA("系統模擬平均首次正確決策時間 (Smart Avg First-Decision Tick)  ", SAvgDecisionTickSum, SDecisionTickIterCount, false);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 平均逃脫所需時間(RSET近似值)", st.avgEscapeTickSum, st.escapeTickIterCount, false);
+        }
         System.err.println("----------------------------------------------");
-        printAvgOrNA("初始模擬系統獲知受困位置平均時間 (Default Avg Trapped-Report Tick)", DAvgTrappedReportSum, DTrappedReportIterCount, false);
-        printAvgOrNA("系統模擬系統獲知受困位置平均時間 (Smart Avg Trapped-Report Tick)  ", SAvgTrappedReportSum, STrappedReportIterCount, false);
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 平均首次正確決策時間", st.avgDecisionTickSum, st.decisionTickIterCount, false);
+        }
+        System.err.println("----------------------------------------------");
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 系統獲知受困位置平均時間", st.avgTrappedReportSum, st.trappedReportIterCount, false);
+        }
+        System.err.println("----------------------------------------------");
+        // 只有SMART/HYBRID才有「建議」可撤回，DEFAULT沒有智慧系統可比較
+        for (int i = 1; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 建議撤回→改道完成延遲", st.revokeToRerouteSum, st.revokeToRerouteIterCount, false);
+        }
+        System.err.println("----------------------------------------------");
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 可用安全逃生時間(ASET近似值)", st.asetSum, st.asetIterCount, false);
+        }
+        System.err.println("----------------------------------------------");
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsByMode.get(modes[i]);
+            printAvgOrNA(labels[i] + " 安全餘裕(ASET−RSET)", st.safetyMarginSum, st.safetyMarginIterCount, false);
+        }
+        System.err.println("----------------------------------------------");
+        System.err.printf("決策支援+備援控制(Hybrid) 平均每場主動控制動作次數(關門/排煙) : %.2f 次\n",
+            iterations > 0 ? statsByMode.get(SimMode.HYBRID).activeControlActionSum / iterations : 0.0);
         System.err.println("==============================================");
     }
 
@@ -1831,7 +2022,7 @@ public class Simulator {
 
     static SimResult runOneSimulation(Obj[][][] baseBuilding, int[][] peopleInit,
                                   int fireZ, int fireY, int fireX,
-                                  boolean useSmart, String outputFile) {
+                                  SimMode mode, String outputFile) {
         try {
             PrintStream output = new PrintStream(outputFile);
             System.setOut(output);
@@ -1861,6 +2052,6 @@ public class Simulator {
         }
         assignCompanions(peopleList);
         
-        return run(useSmart, peopleInit.length);
+        return run(mode, peopleInit.length);
     }
 }
