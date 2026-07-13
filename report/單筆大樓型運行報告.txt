@@ -1,12 +1,12 @@
 無系統生還率：
 total: 552, survive: 7
-Default Average Survival Rate: 0.012681159420289856
+Default Average Survival Rate: 1.2%
 
 有系統生還率：
 total: 552, survive: 546
-Smart Average Survival Rate: 0.9891304347826086
+Smart Average Survival Rate: 98.9%
 
-Average Optimization Degree (Ticks per person): 96.47101449275362
+Average Optimization Degree (Ticks per person): 96.47%
 
 運行時間：2026/7/3 19:22:35~19:31:17，共8分鐘42秒
 
