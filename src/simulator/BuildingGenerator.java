@@ -8,77 +8,141 @@ import java.util.Random;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BuildingGenerator — 建築地圖生成 / 複製
-//   【拆解God Class】原本這些方法直接寫在 Simulator 裡，跟人員/環境/報表邏輯
-//   混在一起。這些方法本身完全是純函式(只依賴傳入的參數，不讀寫 Simulator 的
-//   任何 static 欄位)，因此可以原封不動搬到獨立類別，Simulator 呼叫時只需要
-//   把需要的參數傳進來，不再需要在同一個類別裡才能用。
 // ═══════════════════════════════════════════════════════════════════════════
 class BuildingGenerator {
 
-    static boolean isFloorConnected(Obj[][] layer, int rows, int cols) {
+    // ─── 檢查包含「門」在內的完整連通性 ────────────────────────
+    static boolean isMapConnected(Obj[][] layer, int rows, int cols) {
         int sy = -1, sx = -1;
-        for (int y = 0; y < rows && sy == -1; y++)
-            for (int x = 0; x < cols && sy == -1; x++)
-                if (layer[y][x] instanceof Floor) { sy = y; sx = x; }
-        if (sy == -1) return true;
+        int totalWalkable = 0;
+        
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                if (!(layer[y][x] instanceof Wall)) {
+                    if (sy == -1) { sy = y; sx = x; }
+                    totalWalkable++;
+                }
+            }
+        }
+        if (sy == -1) return true; 
 
         int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
         boolean[][] vis = new boolean[rows][cols];
         Queue<int[]> q = new LinkedList<>();
-        q.add(new int[]{sy, sx}); vis[sy][sx] = true;
+        q.add(new int[]{sy, sx}); 
+        vis[sy][sx] = true;
         int reached = 1;
+        
         while (!q.isEmpty()) {
             int[] c = q.poll();
             for (int i = 0; i < 4; i++) {
                 int ny = c[0] + dy[i], nx = c[1] + dx[i];
-                if (ny >= 0 && ny < rows && nx >= 0 && nx < cols
-                        && !vis[ny][nx] && layer[ny][nx] instanceof Floor) {
-                    vis[ny][nx] = true; reached++; q.add(new int[]{ny, nx});
+                if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
+                    if (!vis[ny][nx] && !(layer[ny][nx] instanceof Wall)) {
+                        vis[ny][nx] = true; 
+                        reached++; 
+                        q.add(new int[]{ny, nx});
+                    }
                 }
             }
         }
-        int total = 0;
-        for (int y = 0; y < rows; y++)
-            for (int x = 0; x < cols; x++)
-                if (layer[y][x] instanceof Floor) total++;
-        return reached == total;
+        return reached == totalWalkable;
     }
 
-    static boolean wouldIsolate(Obj[][] layer, int rows, int cols, int ty, int tx) {
-        Obj original = layer[ty][tx];
-        layer[ty][tx] = new Wall();
-        int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
-        boolean isolate = false;
-        for (int i = 0; i < 4; i++) {
-            int ny = ty + dy[i], nx = tx + dx[i];
-            if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
-            if (!(layer[ny][nx] instanceof Floor)) continue;
-            int freeNeighbors = 0;
-            for (int j = 0; j < 4; j++) {
-                int fy = ny + dy[j], fx = nx + dx[j];
-                if (fy >= 0 && fy < rows && fx >= 0 && fx < cols
-                        && !(layer[fy][fx] instanceof Wall)) freeNeighbors++;
-            }
-            if (freeNeighbors == 0) { isolate = true; break; }
+    // ─── 修正版：BSP 房間切割演算法 ─────────────────────────────────────
+    private static void generateRooms(Obj[][] layer, int x, int y, int w, int h, Random rand) {
+        // 【新增安全防呆】如果傳入的寬或高小於等於 0 (例如極端小的地圖設定)，直接返回避免崩潰
+        if (w <= 0 || h <= 0) return;
+
+        final int MIN_ROOM_SIZE = 4; // 房間內部最小寬/高
+        boolean canSplitH = h >= (MIN_ROOM_SIZE * 2 + 1);
+        boolean canSplitV = w >= (MIN_ROOM_SIZE * 2 + 1);
+
+        if (!canSplitH && !canSplitV) return; // 已經夠小，不再切分
+
+        boolean splitH = false;
+        if (canSplitH && canSplitV) {
+            if (h > w * 1.5) splitH = true;
+            else if (w > h * 1.5) splitH = false;
+            else splitH = rand.nextBoolean();
+        } else if (canSplitH) {
+            splitH = true;
         }
-        layer[ty][tx] = original;
-        return isolate;
-    }
 
-    static boolean space_isWalkable(Obj[][] layer, int rows, int cols, int y, int x) {
-        if (y < 0 || y >= rows || x < 0 || x >= cols) return false;
-        return !(layer[y][x] instanceof Wall);
+        if (splitH) {
+            // 水平切一刀 (y 座標固定)
+            int splitY = y + MIN_ROOM_SIZE + rand.nextInt(h - MIN_ROOM_SIZE * 2);
+
+            // 1. 蓋滿完整的實體牆
+            for (int i = x; i < x + w; i++) layer[splitY][i] = new Wall();
+
+            // 2. 挖洞放門
+            int doorCount = (w > 12 && rand.nextDouble() < 0.3) ? 2 : 1;
+            int[] doorX = new int[doorCount];
+            doorX[0] = x + rand.nextInt(w);
+            if (doorCount == 2) {
+                doorX[1] = x + rand.nextInt(w);
+                while (doorX[1] == doorX[0]) doorX[1] = x + rand.nextInt(w); 
+            }
+
+            for (int dx : doorX) {
+                if (rand.nextBoolean()) {
+                    FireDoor fd = new FireDoor();
+                    fd.isOpen = rand.nextDouble() < 0.15; 
+                    layer[splitY][dx] = fd;
+                } else {
+                    layer[splitY][dx] = new Door();
+                }
+            }
+
+            // 3. 遞迴處理上下兩塊新區域
+            generateRooms(layer, x, y, w, splitY - y, rand);
+            // 💡【已修正】移除前方多餘的 "y +"，確保剩餘高度計算準確
+            generateRooms(layer, x, splitY + 1, w, h - (splitY - y) - 1, rand);
+
+        } else {
+            // 垂直切一刀 (x 座標固定)
+            int splitX = x + MIN_ROOM_SIZE + rand.nextInt(w - MIN_ROOM_SIZE * 2);
+
+            // 1. 蓋滿完整的實體牆
+            for (int i = y; i < y + h; i++) layer[i][splitX] = new Wall();
+
+            // 2. 挖洞放門
+            int doorCount = (h > 12 && rand.nextDouble() < 0.3) ? 2 : 1;
+            int[] doorY = new int[doorCount];
+            doorY[0] = y + rand.nextInt(h);
+            if (doorCount == 2) {
+                doorY[1] = y + rand.nextInt(h);
+                while (doorY[1] == doorY[0]) doorY[1] = y + rand.nextInt(h);
+            }
+
+            for (int dy : doorY) {
+                if (rand.nextBoolean()) {
+                    FireDoor fd = new FireDoor();
+                    fd.isOpen = rand.nextDouble() < 0.15;
+                    layer[dy][splitX] = fd;
+                } else {
+                    layer[dy][splitX] = new Door();
+                }
+            }
+
+            // 3. 遞迴處理左右兩塊新區域
+            generateRooms(layer, x, y, splitX - x, h, rand);
+            generateRooms(layer, splitX + 1, y, w - (splitX - x) - 1, h, rand);
+        }
     }
 
     static Obj[][][] generateMap(int height, int rows, int cols) {
         Obj[][][] obj = new Obj[height][rows][cols];
         Random rand = new Random();
 
+        // 1. 初始化整棟建築為 Floor
         for (int z = 0; z < height; z++)
             for (int y = 0; y < rows; y++)
                 for (int x = 0; x < cols; x++)
                     obj[z][y][x] = new Floor();
 
+        // 2. 鋪設建築最外圍的承重牆
         for (int z = 0; z < height; z++) {
             for (int y = 0; y < rows; y++) {
                 obj[z][y][0] = new Wall(); obj[z][y][cols - 1] = new Wall();
@@ -88,68 +152,66 @@ class BuildingGenerator {
             }
         }
 
+        // 3. 使用 BSP 演算法劃分房間
         for (int z = 0; z < height; z++) {
-            int wallCount = (rows * cols) / (int) (rand.nextDouble(6) + 4), attempts = 0, placed = 0;
-            while (placed < wallCount && attempts < wallCount * 10) {
+            boolean valid = false;
+            int attempts = 0;
+            
+            while (!valid && attempts < 10) {
                 attempts++;
-                int y = rand.nextInt(rows - 2) + 1, x = rand.nextInt(cols - 2) + 1;
-                if (!(obj[z][y][x] instanceof Floor)) continue;
-                if (wouldIsolate(obj[z], rows, cols, y, x)) continue;
-                obj[z][y][x] = new Wall();
-                if (!isFloorConnected(obj[z], rows, cols)) { obj[z][y][x] = new Floor(); continue; }
-                placed++;
-            }
-        }
-
-        for (int z = 0; z < height; z++) {
-            int doorCount = (rows * cols) / 20;
-            int placed = 0, attempts = 0;
-            while (placed < doorCount && attempts < doorCount * 10) {
-                attempts++;
-                int y = rand.nextInt(rows - 2) + 1, x = rand.nextInt(cols - 2) + 1;
-                if (!(obj[z][y][x] instanceof Floor)) continue;
-                boolean wallN = !space_isWalkable(obj[z], rows, cols, y - 1, x);
-                boolean wallS = !space_isWalkable(obj[z], rows, cols, y + 1, x);
-                boolean wallW = !space_isWalkable(obj[z], rows, cols, y, x - 1);
-                boolean wallE = !space_isWalkable(obj[z], rows, cols, y, x + 1);
-                boolean corridor_NS = (wallN && wallS && !wallW && !wallE);
-                boolean corridor_EW = (wallW && wallE && !wallN && !wallS);
-                if (!corridor_NS && !corridor_EW) continue;
-                if (rand.nextBoolean()) {
-                    FireDoor fd = new FireDoor();
-                    // 現實中常見管理疏失：防火門被雜物卡住/圖方便沒關緊，約15%機率一開始就是開著的
-                    fd.isOpen = rand.nextDouble() < 0.15;
-                    obj[z][y][x] = fd;
-                } else {
-                    obj[z][y][x] = new Door();
-                }
-                placed++;
-            }
-        }
-
-        if (height > 1) {
-            Stage[] stages = new Stage[height];
-            for (int z = 0; z < height; z++) {
-                int sy, sx;
-                while (true) {
-                    sy = rand.nextInt(rows - 2) + 1; sx = rand.nextInt(cols - 2) + 1;
-                    if (!(obj[z][sy][sx] instanceof Floor)) continue;
-                    if (z > 0) {
-                        int dist = Math.abs(sy - stages[z - 1].y) + Math.abs(sx - stages[z - 1].x);
-                        if (dist > 3) continue;
+                for (int y = 1; y < rows - 1; y++) {
+                    for (int x = 1; x < cols - 1; x++) {
+                        obj[z][y][x] = new Floor();
                     }
-                    break;
                 }
-                Stage s = new Stage(); s.setLocation(z, sy, sx);
-                stages[z] = s; obj[z][sy][sx] = s;
-            }
-            for (int z = 0; z < height - 1; z++) {
-                stages[z].upfloor = stages[z + 1];
-                stages[z + 1].downfloor = stages[z];
+
+                // 呼叫 BSP 演算法
+                generateRooms(obj[z], 1, 1, cols - 2, rows - 2, rand);
+
+                if (isMapConnected(obj[z], rows, cols)) {
+                    valid = true;
+                }
             }
         }
 
-        if (height > 0) {
+        // 4. 多樓梯生成與配置
+        if (height > 1) {
+            int numStairs = Math.max(MIN_STAIRS, (rows * cols) / STAIR_AREA_PER_UNIT);
+            List<int[]> stairAnchors = new ArrayList<>();
+
+            for (int stairIdx = 0; stairIdx < numStairs; stairIdx++) {
+                Stage[] stages = new Stage[height];
+                for (int z = 0; z < height; z++) {
+                    int sy = -1, sx = -1, attempts = 0;
+                    while (attempts < 300) {
+                        attempts++;
+                        int cy = rand.nextInt(rows - 2) + 1, cx = rand.nextInt(cols - 2) + 1;
+                        if (!(obj[z][cy][cx] instanceof Floor)) continue;
+                        if (z > 0) {
+                            int dist = Math.abs(cy - stages[z - 1].y) + Math.abs(cx - stages[z - 1].x);
+                            if (dist > 3) continue;
+                        }
+                        if (z == 0 && !farEnough(cy, cx, stairAnchors, MIN_STAIR_SEPARATION)) continue;
+                        sy = cy; sx = cx;
+                        break;
+                    }
+                    if (sy == -1) {
+                        sy = rand.nextInt(rows - 2) + 1; sx = rand.nextInt(cols - 2) + 1;
+                    }
+                    Stage s = new Stage(); s.setLocation(z, sy, sx);
+                    stages[z] = s; obj[z][sy][sx] = s;
+                }
+                for (int z = 0; z < height - 1; z++) {
+                    stages[z].upfloor = stages[z + 1];
+                    stages[z + 1].downfloor = stages[z];
+                }
+                stairAnchors.add(new int[]{stages[0].y, stages[0].x});
+                enclosePassage(obj, stages, rows, cols);
+            }
+        }
+
+        // 5. 地面層多出口配置
+        if (height > 0 && rows > 2 && cols > 2) { // 新增邊界保護
             int z = 0;
             List<int[]> edgeCandidates = new ArrayList<>();
             for (int x = 1; x < cols - 1; x++) {
@@ -160,19 +222,93 @@ class BuildingGenerator {
                 if (obj[z][y][1] instanceof Floor)      edgeCandidates.add(new int[]{y, 0});
                 if (obj[z][y][cols - 2] instanceof Floor) edgeCandidates.add(new int[]{y, cols - 1});
             }
-            if (!edgeCandidates.isEmpty()) {
-                int[] chosen = edgeCandidates.get(rand.nextInt(edgeCandidates.size()));
-                obj[z][chosen[0]][chosen[1]] = new Exit();
+
+            int numExits = Math.max(MIN_EXITS, (rows * cols) / EXIT_AREA_PER_UNIT);
+            java.util.Collections.shuffle(edgeCandidates, rand);
+            List<int[]> chosenExits = new ArrayList<>();
+            for (int[] cand : edgeCandidates) {
+                if (chosenExits.size() >= numExits) break;
+                if (!farEnough(cand[0], cand[1], chosenExits, MIN_EXIT_SEPARATION)) continue;
+                chosenExits.add(cand);
             }
+            if (chosenExits.isEmpty() && !edgeCandidates.isEmpty()) chosenExits.add(edgeCandidates.get(0));
+            for (int[] c : chosenExits) obj[z][c[0]][c[1]] = new Exit();
         }
 
+        // 6. 印出統計
+        printCompartmentStats(obj, height, rows, cols);
+
         return obj;
+    }
+
+    private static void printCompartmentStats(Obj[][][] obj, int height, int rows, int cols) {
+        int[] dy = {-1, 1, 0, 0};
+        int[] dx = {0, 0, -1, 1};
+
+        for (int z = 0; z < height; z++) {
+            boolean[][] vis = new boolean[rows][cols];
+            for (int y = 0; y < rows; y++) {
+                for (int x = 0; x < cols; x++) {
+                    Obj currObj = obj[z][y][x];
+                    if (!vis[y][x] && (currObj instanceof Floor || currObj instanceof Stage || currObj instanceof Exit)) {
+                        Queue<int[]> q = new LinkedList<>();
+                        q.add(new int[]{y, x});
+                        vis[y][x] = true;
+
+                        while (!q.isEmpty()) {
+                            int[] c = q.poll();
+                            for (int i = 0; i < 4; i++) {
+                                int ny = c[0] + dy[i], nx = c[1] + dx[i];
+                                if (ny >= 0 && ny < rows && nx >= 0 && nx < cols && !vis[ny][nx]) {
+                                    Obj neighbor = obj[z][ny][nx];
+                                    if (neighbor instanceof Floor || neighbor instanceof Stage || neighbor instanceof Exit) {
+                                        vis[ny][nx] = true;
+                                        q.add(new int[]{ny, nx});
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static final int STAIR_AREA_PER_UNIT = 250;
+    private static final int EXIT_AREA_PER_UNIT  = 250;
+    private static final int MIN_STAIRS = 2;            
+    private static final int MIN_EXITS  = 2;            
+    private static final int MIN_STAIR_SEPARATION = 6;  
+    private static final int MIN_EXIT_SEPARATION  = 6;  
+
+    private static boolean farEnough(int y, int x, List<int[]> existing, int minDist) {
+        for (int[] p : existing) {
+            if (Math.abs(p[0] - y) + Math.abs(p[1] - x) < minDist) return false;
+        }
+        return true;
+    }
+
+    private static void enclosePassage(Obj[][][] obj, Stage[] stages, int rows, int cols) {
+        int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
+        for (Stage s : stages) {
+            if (s == null) continue;
+            for (int i = 0; i < 4; i++) {
+                int ny = s.y + dy[i], nx = s.x + dx[i];
+                if (ny <= 0 || ny >= rows - 1 || nx <= 0 || nx >= cols - 1) continue;
+                if (!(obj[s.z][ny][nx] instanceof Floor)) continue;
+                FireDoor fd = new FireDoor();
+                fd.isOpen = false;
+                obj[s.z][ny][nx] = fd;
+                s.enclosureDoor = fd;
+                break;
+            }
+        }
     }
 
     static Obj[][][] cloneBuilding(Obj[][][] src) {
         int h = src.length, r = src[0].length, c = src[0][0].length;
         Obj[][][] dst = new Obj[h][r][c];
-        Stage[][][] stageMap = new Stage[h][r][c]; // 暫存對應的新 Stage，方便之後重建連結
+        Stage[][][] stageMap = new Stage[h][r][c];
 
         for (int z = 0; z < h; z++) {
             for (int y = 0; y < r; y++) {
@@ -209,7 +345,6 @@ class BuildingGenerator {
             }
         }
 
-        // 重新串接樓梯上下層關係
         for (int z = 0; z < h; z++) {
             for (int y = 0; y < r; y++) {
                 for (int x = 0; x < c; x++) {

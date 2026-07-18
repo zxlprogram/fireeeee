@@ -43,7 +43,7 @@ class ReportGenerator {
         System.err.println("----------------------------------------------");
         for (int i = 0; i < modes.length; i++) {
             ModeStats st = statsMap.get(modes[i]);
-            System.err.printf("%s 臨界CO暴露比例 [場次平權] : %.2f%%\n", labels[i], (scenarioCount > 0 ? st.criticalCOP / scenarioCount : 0) * 100);
+            System.err.printf("%s 臨界CO暴露比例(FED_CO≥0.3，見校正清單§5) [場次平權] : %.2f%%\n", labels[i], (scenarioCount > 0 ? st.criticalCOP / scenarioCount : 0) * 100);
         }
         System.err.println("----------------------------------------------");
         for (int i = 0; i < modes.length; i++) {
@@ -54,6 +54,16 @@ class ReportGenerator {
         for (int i = 0; i < modes.length; i++) {
             ModeStats st = statsMap.get(modes[i]);
             printAvgOrNA(labels[i] + " 改道成功率", st.rerouteSuccessSum, st.rerouteIterCount, true);
+        }
+        System.err.println("----------------------------------------------");
+        System.err.println("※ 死因比例：以「本場死亡人數」為分母(只對有人死亡的場次取平均)，兩者相加為100%。");
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsMap.get(modes[i]);
+            printAvgOrNA(labels[i] + " 死因比例(燒死)", st.fireDeathCauseSum, st.deathCauseIterCount, true);
+        }
+        for (int i = 0; i < modes.length; i++) {
+            ModeStats st = statsMap.get(modes[i]);
+            printAvgOrNA(labels[i] + " 死因比例(CO中毒致死)", st.coDeathCauseSum, st.deathCauseIterCount, true);
         }
         System.err.println("----------------------------------------------");
         for (int i = 0; i < modes.length; i++) {
@@ -74,7 +84,7 @@ class ReportGenerator {
         System.err.println("----------------------------------------------");
         for (int i = 0; i < modes.length; i++) {
             ModeStats st = statsMap.get(modes[i]);
-            printAvgOrNA(labels[i] + " 可用安全逃生時間(ASET，所有可停留格子煙霧>0.7或起火)", st.asetSum, st.asetIterCount, false);
+            printAvgOrNA(labels[i] + " 可用安全逃生時間(ASET，所有可停留格子四判据[溫度/輻射熱通量/CO瞬時濃度/能見度smoke>0.7]同時達標或起火，見校正清單§10/§11)", st.asetSum, st.asetIterCount, false);
         }
         System.err.println("----------------------------------------------");
         for (int i = 0; i < modes.length; i++) {

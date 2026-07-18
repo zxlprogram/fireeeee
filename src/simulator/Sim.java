@@ -10,7 +10,7 @@ class sim {
         //         總場景數 = 建築類型數量 × 每個建築類型的場景數，請自行斟酌調整
         Data[] data = new Data[10];
         for (int i = 0; i < data.length; i++) {
-            data[i] = new Data(new Range(1, 11), new Range(5, 51), new Range(5, 51));
+            data[i] = new Data(new Range(5, 6), new Range(24, 25), new Range(24, 25),FireCause.ACCIDENTAL);
         }
         s.work(data, 10);
     }

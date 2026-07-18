@@ -99,10 +99,26 @@ public class Simulator implements SimulationContext {
         stageAssignCount++;
     }
 
+    // 【校正清單§9】實作countNearbyPeopleOnFloor：線性掃過peopleList統計「同樓層、
+    // 以(z,y,x)為中心的正方形鄰域內」還沒逃生/死亡的人數(含自己)，供People.currentSpeed()
+    // 算局部人流密度。peopleList通常是數十~數百人量級，每人每tick一次O(N)掃描在目前
+    // 的模擬規模下可接受；若之後人數大幅增加，可改成依樓層/座標分桶的空間索引優化。
     @Override
-    public double smokeToleranceFactor() {
-        return (currentCause != null) ? currentCause.smokeToleranceFactor : 1.0;
+    public int countNearbyPeopleOnFloor(int z, int y, int x, int radiusBlocks) {
+        int count = 0;
+        for (People p : peopleList) {
+            if (p.isDead || p.isEscaped) continue;
+            if (p.z != z) continue;
+            if (Math.abs(p.y - y) <= radiusBlocks && Math.abs(p.x - x) <= radiusBlocks) {
+                count++;
+            }
+        }
+        return count;
     }
+
+    // 【校正清單§5】smokeToleranceFactor()已移除：起火原因對CO毒性的影響改成
+    // 直接掛在EnvironmentSimulator生成coPpm的速率上(FireCause.representativeFuel)，
+    // 不再需要透過SimulationContext暴露給People。
 
     // 將 run 修改為回傳每個人的生存時間陣列，並且準確記錄他們的真實結局與暴露統計
     SimResult run(SimMode mode, int totalPeople) {
@@ -123,6 +139,11 @@ public class Simulator implements SimulationContext {
         do {
             tick++;
             activeControlActionCount += EnvironmentSimulator.spread(space, currentCause, tick, activeControlEnabled, random);
+
+            // 【校正清單§1/§12】每tick開頭重置門/出口的通過流量瓶頸容量，
+            // 見DoorFlowModel。要放在People行動之前，才能讓這個tick的移動判斷
+            // (RouteFinder.isPassable)吃到本tick最新的容量。
+            DoorFlowModel.resetTick(space);
 
             // ASET：每tick檢查一次，只要建築裡還有任何一格Floor/Stage沒陷入危險，asetTick維持null；
             // 第一次全部格子都陷入危險時，記下這個tick作為本場的ASET上限。
@@ -151,7 +172,7 @@ public class Simulator implements SimulationContext {
                 if (p.isDead) {
                     result.recordPersonSnapshot(p, tick, Outcome.DEAD);
                     sessionExporter.logEvent(tick, "DEATH", p.id,
-                        "人員死亡 (累積CO: " + String.format("%.3f", p.accumulatedCO) + ")");
+                        "人員死亡 (FED_CO: " + String.format("%.3f", p.fedCO) + ")");
                     removed.add(p);
                 }
                 else if (p.isEscaped) {
@@ -181,6 +202,7 @@ public class Simulator implements SimulationContext {
         int rerouteAttemptCount = 0, rerouteSuccessCount = 0;
         int vulnerableTotal = 0, vulnerableIdentifiedCount = 0;
         int deathCount = 0, trappedCount = 0; // 三分類：逃生/死亡/受困
+        int fireDeathCount = 0, coDeathCount = 0; // 死因細分：燒死/CO中毒致死(僅在死亡者中有意義)
         long escapeTickSum = 0, escapeTickN = 0;
         long revokeToRerouteSum = 0, revokeToRerouteN = 0;
         long awarenessSum = 0, awarenessN = 0;
@@ -203,6 +225,8 @@ public class Simulator implements SimulationContext {
                 escapeTickN++;
             } else if (result.outcomes[i] == Outcome.DEAD) {
                 deathCount++;
+                if (result.deathCauses[i] == DeathCause.FIRE) fireDeathCount++;
+                else if (result.deathCauses[i] == DeathCause.CO_POISONING) coDeathCount++;
             } else {
                 trappedCount++;
             }
@@ -224,6 +248,9 @@ public class Simulator implements SimulationContext {
         double deathRate          = (double) deathCount / totalPeople;
         double trappedRate        = (double) trappedCount / totalPeople;
         double rerouteSuccessRate = (rerouteAttemptCount > 0) ? (double) rerouteSuccessCount / rerouteAttemptCount : -1; // -1代表本場沒有發生改道
+        // 死因比例：以「本場死亡人數」為分母，-1代表本場沒有人死亡，不計入平均
+        double fireDeathRate = (deathCount > 0) ? (double) fireDeathCount / deathCount : -1;
+        double coDeathRate   = (deathCount > 0) ? (double) coDeathCount   / deathCount : -1;
         double vulnerableIdRate   = (vulnerableTotal > 0) ? (double) vulnerableIdentifiedCount / vulnerableTotal : -1;    // -1代表本場沒有需優先協助對象
         double avgEscapeTick      = (escapeTickN > 0) ? (double) escapeTickSum / escapeTickN : -1;
         double avgRevokeToReroute = (revokeToRerouteN > 0) ? (double) revokeToRerouteSum / revokeToRerouteN : -1;
@@ -243,6 +270,11 @@ public class Simulator implements SimulationContext {
         stats.criticalCOP   += (double) criticalCOCount / totalPeople;
         stats.wrongRouteP   += wrongRouteRate;
         if (rerouteSuccessRate >= 0) { stats.rerouteSuccessSum += rerouteSuccessRate; stats.rerouteIterCount++; }
+        if (deathCount > 0) {
+            stats.fireDeathCauseSum += fireDeathRate;
+            stats.coDeathCauseSum   += coDeathRate;
+            stats.deathCauseIterCount++;
+        }
         if (vulnerableIdRate  >= 0)  { stats.vulnerableIdSum   += vulnerableIdRate;   stats.vulnerableIterCount++; }
         if (avgEscapeTick     >= 0)  { stats.avgEscapeTickSum  += avgEscapeTick;      stats.escapeTickIterCount++; }
         if (avgRevokeToReroute >= 0) { stats.revokeToRerouteSum += avgRevokeToReroute; stats.revokeToRerouteIterCount++; }
@@ -347,8 +379,7 @@ public class Simulator implements SimulationContext {
             for (int sc = 0; sc < count; sc++) {
                 System.err.println("-- 場景 " + (sc + 1) + "/" + count + " --");
                 Random rand = new Random();
-                FireCause[] causes = FireCause.values();
-                currentCause = causes[rand.nextInt(causes.length)];
+                currentCause = data[bt].cause;
                 System.err.println("起火原因: " + currentCause);
 
                 // 同一棟建築(baseBuilding幾何不變)，每個場景各自重抽一個新的火源位置

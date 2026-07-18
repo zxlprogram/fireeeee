@@ -14,7 +14,7 @@ class VisionSystem {
     //   - 已被火封死的門(blocked)：視為障礙物，一定擋
     //   - 防火門：關著(isOpen=false)才擋，開著(isOpen=true)就看得穿
     //   - 一般門(非FireDoor)：本身沒有isOpen欄位，視為恆常關閉，一定擋
-    //   - 濃煙：該格smoke > 0.7時，視線被煙霧遮蔽，擋住後方視線
+    //   - 濃煙：該格smoke(能見度危害代理量，見校正清單§2/WorldObjects.Obj) > 0.7時，視線被煙霧遮蔽，擋住後方視線
     //   - 火源：該格本身正在燒(fire=true)，火焰/熱浪擋住後方視線
     static boolean isOpaque(Obj o) {
         if (o instanceof Wall) return true;

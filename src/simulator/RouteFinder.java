@@ -32,10 +32,13 @@ class RouteFinder {
     }
 
     // 確認障礙物邏輯，防火門可通行
+    // 【校正清單§1】新增門/出口流量瓶頸判斷(DoorFlowModel)：本tick容量耗盡的
+    // Door/Exit視為暫時不可通行，逼真人必須繞道或原地等待，近似現實中的排隊現象。
     boolean isPassable(Obj o) {
         if (o instanceof Wall) return false;
         if (o instanceof Door && ((Door) o).blocked) return false;
         if (o.fire) return false;
+        if (!DoorFlowModel.hasCapacity(o)) return false;
         return true;
     }
 
@@ -240,6 +243,12 @@ class RouteFinder {
     // 連通性檢查：用目前已知的火/危險格，判斷「起點→目標格」是否仍存在一條
     // 不經過火/高危格的路徑。只需要知道「通不通」，用BFS即可，不需要算最短路，比重跑一次
     // Dijkstra便宜很多，適合每tick都要做的撤回判定。
+    // 【校正清單§1】isPassable()現在也會檢查門/出口的流量瓶頸(DoorFlowModel)，
+    // 代表本tick「容量剛好被別人用完」的門，這裡會被視為暫時不可達，可能讓
+    // SmartEscapeStrategy誤判成連通性喪失而觸發撤回改道——這其實是瓶頸擁堵的
+    // 合理副作用(系統發現這條路暫時塞住，先繞道)，但如果之後要更精確地區分
+    // 「永久不可達(著火)」與「暫時擁堵(下tick可能就通了)」，可以在這裡另外
+    // 加一個「只忽略門流量限制、只看結構性/火源阻絕」的版本。
     boolean isReachable(int fz, int fy, int fx, int tz, int ty, int tx,
                          Set<Integer> knownFires, Set<Integer> knownHazards) {
         int startKey = GridKeys.bitKey(fz, fy, fx);

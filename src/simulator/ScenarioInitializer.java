@@ -15,6 +15,11 @@ class ScenarioInitializer {
         if (space.isValid(z, y, x)) {
             space.building[z][y][x].fire  = true;
             space.building[z][y][x].smoke = 0.5;
+            // 【校正清單§2/§3】起火點在tick迴圈開始「之前」就已經點燃，
+            // 這裡設ignitedAtTick=0，讓它的HRR成長曲線從模擬一開始
+            // (tick從1起算)就已經有非零的「已經過經過時間」，跟其他
+            // 後來才被延燒到的格子(ignitedAtTick=實際延燒發生的tick)一致對待。
+            space.building[z][y][x].ignitedAtTick = 0;
             System.out.println("【系統】已於座標 (" + z + ", " + y + ", " + x + ") 設定初始火源！\n");
         }
     }

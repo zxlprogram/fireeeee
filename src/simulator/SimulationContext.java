@@ -9,7 +9,6 @@ import java.util.List;
 //   - Simulator.systemAwarenessTick   (People.stillUnaware)
 //   - Simulator.allPeopleById         (People.waitForCompanion)
 //   - Simulator.stageAssignCount++    (People.instinctiveEscapeStep / planNextAdvice)
-//   - Simulator.currentCause          (People.effectiveCoThreshold)
 //   - Simulator.detectors             (RouteFinder.gatherKnownHazards)
 // 這是典型的「反向耦合」：本來應該是 Simulator 依賴/驅動 People，
 // 結果變成 People 內部反過來認得 Simulator 這個具體類別，兩者互相牽制，
@@ -37,7 +36,13 @@ interface SimulationContext {
     // 用於統計「改道成功率」的分母
     void onStageAssigned();
 
-    // 取代 Simulator.currentCause.smokeToleranceFactor：本場模擬起火原因對煙霧毒性的倍率，
-    // 若尚未設定起火原因則回傳 1.0(不加成也不懲罰)
-    double smokeToleranceFactor();
+    // 【校正清單§9，新增】People.currentSpeed()查詢「同樓層、以(z,y,x)為中心、
+    // 邊長(2×radiusBlocks+1)個block的正方形鄰域內，目前有幾個人(含自己)」，
+    // 用來算局部人流密度，代入Fruin/SFPE的S=k1−k2·D公式抑制移動速度。
+    int countNearbyPeopleOnFloor(int z, int y, int x, int radiusBlocks);
+
+    // 【校正清單§5】原本這裡還有 smokeToleranceFactor()，把起火原因對煙霧毒性的
+    // 影響直接乘進「個人」的CO致命閾值。校正後，起火原因改成只影響
+    // EnvironmentSimulator生成CO(coPpm)的速率(見FireCause.representativeFuel)，
+    // 不再需要跨People/Simulator邊界查詢，因此這個方法已移除。
 }

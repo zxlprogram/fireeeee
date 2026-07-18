@@ -11,7 +11,12 @@ class DefaultEscapeStrategy implements EscapeStrategy {
 
     @Override
     public void step(People p, int currentTick) {
-        p.accumulatedCO += p.space.building[p.z][p.y][p.x].smoke;
+        // 【校正清單§5】CO吸入劑量改用Purser FED_CO模型，不再直接把smoke(能見度
+        // 代理量)累加當成CO劑量，見People.absorbCO()。
+        // 【修正】熱暴露死因改用同一套劑量模型(見People.absorbThermal())，取代
+        // 原本「踩到火格瞬間死亡」的硬編碼判定。
+        p.absorbCO();
+        p.absorbThermal();
         p.checkStatus();
         if (p.isDead || p.isEscaped) return;
 
@@ -43,9 +48,11 @@ class DefaultEscapeStrategy implements EscapeStrategy {
             }
         }
 
-        // 帶小孩：一開始要花幾個tick尋找/確認小孩安全，這段期間不會主動逃生
-        if (p.childGatherDelay > 0) {
-            p.childGatherDelay--;
+        // 【校正清單§9】準備時間(pre-movement time)：察覺異常後，所有角色都會先
+        // 花一段對數常態分布的時間才真正開始逃生移動(不再只有WITH_CHILD才有延遲)，
+        // 見PanicModel.samplePremovementTicks()。
+        if (p.premovementTicksRemaining > 0) {
+            p.premovementTicksRemaining--;
             return;
         }
 

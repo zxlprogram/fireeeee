@@ -84,7 +84,7 @@ class SessionExporter {
         public boolean isDead;
         public boolean isEscaped;
         public boolean aware;
-        public double accumulatedCO;
+        public double fedCO; // 【校正清單§5】原accumulatedCO(原始smoke累加)，改成Purser FED_CO劑量(無因次)
         public double panicLevel;
         public boolean networkConnected;
         public String currentTask; // "ESCAPE", "WAIT_RESCUE", "WAIT_COMPANION", "GATHERING_CHILD", "IDLE"
@@ -97,7 +97,7 @@ class SessionExporter {
                    indent + "  \"isDead\": " + isDead + ",\n" +
                    indent + "  \"isEscaped\": " + isEscaped + ",\n" +
                    indent + "  \"aware\": " + aware + ",\n" +
-                   indent + "  \"accumulatedCO\": " + String.format("%.3f", accumulatedCO) + ",\n" +
+                   indent + "  \"fedCO\": " + String.format("%.4f", fedCO) + ",\n" +
                    indent + "  \"panicLevel\": " + String.format("%.3f", panicLevel) + ",\n" +
                    indent + "  \"networkConnected\": " + networkConnected + ",\n" +
                    indent + "  \"currentTask\": \"" + currentTask + "\"\n" +
@@ -122,13 +122,17 @@ class SessionExporter {
     public static class GridState {
         public int z, y, x;
         public boolean fire;
-        public double smoke;
+        public double smoke; // 能見度危害代理量(0~1)，見WorldObjects.Obj註解
+        public double coPpm; // 【新增，校正清單§5】CO濃度(ppm)，跟smoke分開追蹤
+        public double tempC; // 【新增，校正清單§10/§11】氣體溫度(°C)，見WorldObjects.Obj註解
 
         public String toJson(String indent) {
             return indent + "{\n" +
                    indent + "  \"position\": [" + z + ", " + y + ", " + x + "],\n" +
                    indent + "  \"fire\": " + fire + ",\n" +
-                   indent + "  \"smoke\": " + String.format("%.3f", smoke) + "\n" +
+                   indent + "  \"smoke\": " + String.format("%.3f", smoke) + ",\n" +
+                   indent + "  \"coPpm\": " + String.format("%.1f", coPpm) + ",\n" +
+                   indent + "  \"tempC\": " + String.format("%.1f", tempC) + "\n" +
                    indent + "}";
         }
     }
@@ -209,7 +213,7 @@ class SessionExporter {
             ps.isDead = p.isDead;
             ps.isEscaped = p.isEscaped;
             ps.aware = p.aware;
-            ps.accumulatedCO = p.accumulatedCO;
+            ps.fedCO = p.fedCO;
             ps.panicLevel = p.panic.panicLevel;
             ps.networkConnected = p.device.networkConnected;
 
@@ -220,8 +224,8 @@ class SessionExporter {
                 ps.currentTask = "DEAD";
             } else if (p.profile == PersonProfile.IMPAIRED && p.waitingForRescue) {
                 ps.currentTask = "WAIT_RESCUE";
-            } else if (p.childGatherDelay > 0) {
-                ps.currentTask = "GATHERING_CHILD";
+            } else if (p.premovementTicksRemaining > 0) {
+                ps.currentTask = "PREMOVEMENT_DELAY";
             } else if (p.targetStage != null) {
                 ps.currentTask = "MOVE_FLOOR";
             } else if (p.junctionTargetPos != null) {
@@ -243,19 +247,23 @@ class SessionExporter {
             snapshot.detectorStates.add(ds);
         }
 
-        // 3. 紀錄動態火煙環境（只記錄有煙霧 smoke > 0.01 或有起火的網格，優化檔案大小）
+        // 3. 紀錄動態火煙環境（只記錄有煙霧smoke>0.01、有CO濃度、溫度高於常溫、
+        //    或有起火的網格，優化檔案大小）
         Obj[][][] map = space.building;
         for (int z = 0; z < space.height; z++) {
             for (int y = 0; y < space.rows; y++) {
                 for (int x = 0; x < space.cols; x++) {
                     Obj obj = map[z][y][x];
-                    if (obj.fire || obj.smoke > 0.01) {
+                    boolean warmedUp = obj.tempC > PhysicalConstants.AMBIENT_TEMP_C + 0.5;
+                    if (obj.fire || obj.smoke > 0.01 || obj.coPpm > 1.0 || warmedUp) {
                         GridState gs = new GridState();
                         gs.z = z;
                         gs.y = y;
                         gs.x = x;
                         gs.fire = obj.fire;
                         gs.smoke = obj.smoke;
+                        gs.coPpm = obj.coPpm;
+                        gs.tempC = obj.tempC;
                         snapshot.dynamicGrids.add(gs);
                     }
                 }

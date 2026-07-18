@@ -15,7 +15,11 @@ class SmartEscapeStrategy implements EscapeStrategy {
 
     @Override
     public void step(People p, int currentTick) {
-        p.accumulatedCO += p.space.building[p.z][p.y][p.x].smoke;
+        // 【校正清單§5】CO吸入劑量改用Purser FED_CO模型，見People.absorbCO()。
+        // 【修正】熱暴露死因改用同一套劑量模型(見People.absorbThermal())，取代
+        // 原本「踩到火格瞬間死亡」的硬編碼判定。
+        p.absorbCO();
+        p.absorbThermal();
         p.checkStatus();
         if (p.isDead || p.isEscaped) return;
 
@@ -95,9 +99,11 @@ class SmartEscapeStrategy implements EscapeStrategy {
             // 仍有效的話這個tick不特別處理，交給下面主迴圈沿快取路徑走
         }
 
-        // 帶小孩：一開始要花幾個tick尋找/確認小孩安全
-        if (p.childGatherDelay > 0) {
-            p.childGatherDelay--;
+        // 【校正清單§9】準備時間(pre-movement time)：察覺異常後，所有角色都會先
+        // 花一段對數常態分布的時間才真正開始逃生移動(不再只有WITH_CHILD才有延遲)，
+        // 見PanicModel.samplePremovementTicks()。
+        if (p.premovementTicksRemaining > 0) {
+            p.premovementTicksRemaining--;
             return;
         }
 
@@ -147,7 +153,9 @@ class SmartEscapeStrategy implements EscapeStrategy {
         // ─── 同樓層移動也是正式任務單位：沿快取好的junctionPath走，
         // 只有在「沒有任何進行中任務」或「剛走到任務目標格」時才重新呼叫 computeSmartPath() 規劃下一段。
         boolean moved = false;
-        for (int step = 0; step < p.speed; step++) {
+        // 【校正清單§1】跟instinctiveEscapeStep一樣，這tick的移動力依「tick開頭所在地形」決定。
+        int speed = p.currentSpeed();
+        for (int step = 0; step < speed; step++) {
             if (p.targetStage != null) {
                 // 上一輪迴圈(或這個tick最上面)剛指派了「下個tick跨樓層」的任務，
                 // 這個tick先停在這裡，實際跨越動作留到下個tick開頭執行。
@@ -163,7 +171,9 @@ class SmartEscapeStrategy implements EscapeStrategy {
 
             int[] nextCell = p.junctionPath.get(p.junctionPathIdx);
             moved = true;
+            Obj destCell = p.space.building[nextCell[0]][nextCell[1]][nextCell[2]];
             p.z = nextCell[0]; p.y = nextCell[1]; p.x = nextCell[2];
+            DoorFlowModel.consume(destCell); // 【校正清單§1】實際走進門/出口才消耗通行名額
             p.junctionPathIdx++;
             if (p.kpi.firstCorrectDecisionTick == null) p.kpi.firstCorrectDecisionTick = currentTick;
             p.checkStatus();
@@ -184,6 +194,6 @@ class SmartEscapeStrategy implements EscapeStrategy {
                 p.kpi.adviceIssuedTick = null;
             }
         }
-        if (!moved) p.randomMove(p.speed);
+        if (!moved) p.randomMove(speed);
     }
 }

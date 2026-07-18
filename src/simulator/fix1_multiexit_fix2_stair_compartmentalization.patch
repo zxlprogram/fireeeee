@@ -1,0 +1,313 @@
+--- a/simulator/WorldObjects.java
++++ b/simulator/WorldObjects.java
+@@ -93,6 +93,13 @@
+     Stage downfloor;
+     int x, y, z;
+ 
++    // 【修正2：樓梯間防火隔間】這座樓梯在「本層」的防護入口門，由BuildingGenerator
++    // 在生成樓梯時一併建立(見enclosePassage())。EnvironmentSimulator做跨樓層
++    // (煙/煙味/CO/熱/火)傳播時，改成先檢查這道門有沒有被突破，取代原本「無條件
++    // 直接傳到下一層樓梯格」的作法。可能為null(極端擁擠、放不下門的地圖)，
++    // 這種情況下維持原本「無防護」的行為當保底。
++    Door enclosureDoor;
++
+     public void setLocation(int z, int y, int x) {
+         this.z = z; this.y = y; this.x = x;
+     }
+--- a/simulator/BuildingGenerator.java
++++ b/simulator/BuildingGenerator.java
+@@ -127,28 +127,59 @@
+             }
+         }
+ 
++        // 【修正1：多樓梯】原本不論建築多大/多高，永遠只生成「一座」樓梯，
++        // 讓所有樓層的人共用同一條垂直逃生通道——這是單點故障：只要這條唯一
++        // 通道在任何一層被封住，上面所有樓層就永遠逃不出去，不管決策支援系統
++        // 多聰明都繞不出第二條路。改成依樓地板面積縮放座數(至少2座)，並要求
++        // 彼此在地面層保持最小距離，避免規劃出來的「多座」樓梯其實擠在同一個
++        // 角落，一起被同一場火封死，失去備援的意義。
+         if (height > 1) {
+-            Stage[] stages = new Stage[height];
+-            for (int z = 0; z < height; z++) {
+-                int sy, sx;
+-                while (true) {
+-                    sy = rand.nextInt(rows - 2) + 1; sx = rand.nextInt(cols - 2) + 1;
+-                    if (!(obj[z][sy][sx] instanceof Floor)) continue;
+-                    if (z > 0) {
+-                        int dist = Math.abs(sy - stages[z - 1].y) + Math.abs(sx - stages[z - 1].x);
+-                        if (dist > 3) continue;
++            int numStairs = Math.max(MIN_STAIRS, (rows * cols) / STAIR_AREA_PER_UNIT);
++            List<int[]> stairAnchors = new ArrayList<>();
++
++            for (int stairIdx = 0; stairIdx < numStairs; stairIdx++) {
++                Stage[] stages = new Stage[height];
++                for (int z = 0; z < height; z++) {
++                    int sy = -1, sx = -1, attempts = 0;
++                    while (attempts < 300) {
++                        attempts++;
++                        int cy = rand.nextInt(rows - 2) + 1, cx = rand.nextInt(cols - 2) + 1;
++                        if (!(obj[z][cy][cx] instanceof Floor)) continue;
++                        if (z > 0) {
++                            int dist = Math.abs(cy - stages[z - 1].y) + Math.abs(cx - stages[z - 1].x);
++                            if (dist > 3) continue;
++                        }
++                        if (z == 0 && !farEnough(cy, cx, stairAnchors, MIN_STAIR_SEPARATION)) continue;
++                        sy = cy; sx = cx;
++                        break;
++                    }
++                    if (sy == -1) {
++                        // 保底：極端擁擠/狹小的地圖可能真的找不到理想位置，
++                        // 寧可放寬間距要求也要讓每層都有樓梯可用。
++                        sy = rand.nextInt(rows - 2) + 1; sx = rand.nextInt(cols - 2) + 1;
+                     }
+-                    break;
++                    Stage s = new Stage(); s.setLocation(z, sy, sx);
++                    stages[z] = s; obj[z][sy][sx] = s;
+                 }
+-                Stage s = new Stage(); s.setLocation(z, sy, sx);
+-                stages[z] = s; obj[z][sy][sx] = s;
+-            }
+-            for (int z = 0; z < height - 1; z++) {
+-                stages[z].upfloor = stages[z + 1];
+-                stages[z + 1].downfloor = stages[z];
++                for (int z = 0; z < height - 1; z++) {
++                    stages[z].upfloor = stages[z + 1];
++                    stages[z + 1].downfloor = stages[z];
++                }
++                stairAnchors.add(new int[]{stages[0].y, stages[0].x});
++
++                // 【修正2：樓梯間防火隔間】幫這座樓梯的每一層樓層入口都包一道
++                // 防火門(預設關好)，讓樓梯間變成有防火時效保護的獨立豎井，
++                // 而不是直接跟走廊共用同一個開放的煙/火擴散場。門的物件本身
++                // 記錄在Stage.enclosureDoor上，供EnvironmentSimulator的跨樓層
++                // 傳播判定使用(見該檔案的stairDoorLeaks()/stairDoorFireBreaches())。
++                enclosePassage(obj, stages, rows, cols);
+             }
+         }
+ 
++        // 【修正1：多出口】原本整棟建築不論幾層樓，永遠只在地面層放「一個」
++        // 安全出口，所有人最後都要擠過同一扇門(還有DoorFlowModel的流量瓶頸)。
++        // 改成依地面層規模縮放數量(至少2個)，並盡量分散在不同邊、保持最小距離，
++        // 降低所有樓層人流最終仍收斂成單一瓶頸的機率。
+         if (height > 0) {
+             int z = 0;
+             List<int[]> edgeCandidates = new ArrayList<>();
+@@ -160,15 +191,62 @@
+                 if (obj[z][y][1] instanceof Floor)      edgeCandidates.add(new int[]{y, 0});
+                 if (obj[z][y][cols - 2] instanceof Floor) edgeCandidates.add(new int[]{y, cols - 1});
+             }
+-            if (!edgeCandidates.isEmpty()) {
+-                int[] chosen = edgeCandidates.get(rand.nextInt(edgeCandidates.size()));
+-                obj[z][chosen[0]][chosen[1]] = new Exit();
++
++            int numExits = Math.max(MIN_EXITS, (rows * cols) / EXIT_AREA_PER_UNIT);
++            java.util.Collections.shuffle(edgeCandidates, rand);
++            List<int[]> chosenExits = new ArrayList<>();
++            for (int[] cand : edgeCandidates) {
++                if (chosenExits.size() >= numExits) break;
++                if (!farEnough(cand[0], cand[1], chosenExits, MIN_EXIT_SEPARATION)) continue;
++                chosenExits.add(cand);
+             }
++            if (chosenExits.isEmpty() && !edgeCandidates.isEmpty()) chosenExits.add(edgeCandidates.get(0));
++            for (int[] c : chosenExits) obj[z][c[0]][c[1]] = new Exit();
+         }
+ 
+         return obj;
+     }
+ 
++    // ─── 【修正1】多樓梯/多出口的縮放與間距常數 ─────────────────────────
++    // 數值是依「至少要有備援路徑」這個目標拍腦袋訂的合理下限，不是嚴謹的
++    // 消防法規逐條換算；之後若要接規範(如各國建築技術規則的最遠步行距離/
++    // 出口寬度規定)，只需要調整這幾個常數。
++    private static final int STAIR_AREA_PER_UNIT = 250; // 樓地板每約250格配置一座樓梯的密度基準
++    private static final int EXIT_AREA_PER_UNIT  = 250; // 地面層每約250格配置一個出口的密度基準
++    private static final int MIN_STAIRS = 2;            // 至少2座樓梯，確保單一樓梯被封死時還有備援
++    private static final int MIN_EXITS  = 2;            // 至少2個出口，避免所有人擠向同一扇門
++    private static final int MIN_STAIR_SEPARATION = 6;  // 樓梯彼此的最小曼哈頓距離，避免「備援」其實擠在同一角落
++    private static final int MIN_EXIT_SEPARATION  = 6;  // 出口彼此的最小曼哈頓距離
++
++    private static boolean farEnough(int y, int x, List<int[]> existing, int minDist) {
++        for (int[] p : existing) {
++            if (Math.abs(p[0] - y) + Math.abs(p[1] - x) < minDist) return false;
++        }
++        return true;
++    }
++
++    // 【修正2】幫一座樓梯的每一層入口都包一道防火門：找這一格樓梯格四個方向裡，
++    // 第一個仍是Floor(還沒被牆/其他門佔用)的鄰格，轉成FireDoor並設為「已關好」
++    // (isOpen=false)——樓梯間屬於法定逃生通道，預設不會像一般防火門那樣有
++    // 15%管理疏失沒關好的機率。同一層只需要一個代表性的入口門，門物件存進
++    // Stage.enclosureDoor，供環境擴散邏輯做跨樓層傳播的防火判定。
++    private static void enclosePassage(Obj[][][] obj, Stage[] stages, int rows, int cols) {
++        int[] dy = {-1, 1, 0, 0}, dx = {0, 0, -1, 1};
++        for (Stage s : stages) {
++            if (s == null) continue;
++            for (int i = 0; i < 4; i++) {
++                int ny = s.y + dy[i], nx = s.x + dx[i];
++                if (ny <= 0 || ny >= rows - 1 || nx <= 0 || nx >= cols - 1) continue;
++                if (!(obj[s.z][ny][nx] instanceof Floor)) continue;
++                FireDoor fd = new FireDoor();
++                fd.isOpen = false;
++                obj[s.z][ny][nx] = fd;
++                s.enclosureDoor = fd;
++                break;
++            }
++        }
++    }
++
+     static Obj[][][] cloneBuilding(Obj[][][] src) {
+         int h = src.length, r = src[0].length, c = src[0][0].length;
+         Obj[][][] dst = new Obj[h][r][c];
+--- a/simulator/EnvironmentSimulator.java
++++ b/simulator/EnvironmentSimulator.java
+@@ -146,10 +146,16 @@
+         }
+     }
+ 
++    // 【修正2，bug修正】原本這裡在while迴圈裡不斷用candidate=cur覆蓋，迴圈跑完後
++    // candidate會停在「最後一個」符合smoke<0.7的樓層，也就是整條樓梯間裡「最遠」
++    // (通常是最頂層)的未起煙樓層，而不是直上「最近」的一層——等於煙霧(以及沿用
++    // 同一個方法的火勢延燒判定)每個tick都可能直接跳到大樓最頂層，跳過中間所有
++    // 樓層。改成找到第一個符合條件就直接return(跟findSmokeDownTarget的寫法一致)，
++    // 讓跨樓層傳播回到「一次只吃掉最近一層」的合理行為。
+     static Stage findSmokeUpTarget(Stage origin) {
+-        Stage cur = origin.upfloor, candidate = null;
+-        while (cur != null) { if (cur.smoke < 0.7) candidate = cur; cur = cur.upfloor; }
+-        return candidate;
++        Stage cur = origin.upfloor;
++        while (cur != null) { if (cur.smoke < 0.7) return cur; cur = cur.upfloor; }
++        return null;
+     }
+ 
+     static Stage findSmokeDownTarget(Stage origin) {
+@@ -158,6 +164,39 @@
+         return null;
+     }
+ 
++    // ─── 【修正2：樓梯間防火隔間】跨樓層傳播的防火門判定 ─────────────────
++    // 原本煙/煙味/CO/熱/火要從樓梯間的一層傳到另一層時，完全不檢查該樓層樓梯
++    // 入口有沒有防護門，等於門形同虛設。現在改成：
++    //   - stairDoorLeaks()：非致命的持續滲漏(煙/煙味/CO/熱)，沿用門縫穿越的
++    //     固定機率，跟同層的門縫滲漏共用同一套常數。
++    //   - stairDoorFireBreaches()：火勢本身要點燃目標樓層的樓梯格之前，門必須
++    //     先被燒穿——沿用跟一般防火門對抗火勢延燒相同的Weibull耐火時效存活
++    //     分布(累積曝火時間越久，這個tick被突破的機率越高)，不再無條件放行。
++    // 若這座樓梯在該層沒有記錄到enclosureDoor(極端擁擠地圖放不下門)，兩者都
++    // 回傳true，維持修正前「無防護」的保底行為，不會讓地圖生成失敗。
++    private static boolean stairDoorLeaks(Stage target, Random random) {
++        Door d = (target != null) ? target.enclosureDoor : null;
++        if (d == null || d.blocked) return true;
++        boolean closedFiredoor = (d instanceof FireDoor) && !((FireDoor) d).isOpen;
++        double prob = closedFiredoor ? SMOKE_SPREAD_PROB_FIREDOOR : SMOKE_SPREAD_PROB_NORMALDOOR;
++        return random.nextDouble() < prob;
++    }
++
++    private static boolean stairDoorFireBreaches(Stage target, int tick, Random random) {
++        Door d = (target != null) ? target.enclosureDoor : null;
++        if (d == null || d.blocked) return true;
++        if (d.fireExposureStartTick < 0) d.fireExposureStartTick = tick;
++        boolean isFiredoor = d instanceof FireDoor;
++        double ratingMinutes = isFiredoor ? PhysicalConstants.FIREDOOR_RATING_MINUTES
++                                           : PhysicalConstants.DOOR_UNRATED_EQUIVALENT_MINUTES;
++        double shape = isFiredoor ? PhysicalConstants.WEIBULL_SHAPE_FIREDOOR
++                                   : PhysicalConstants.WEIBULL_SHAPE_NORMALDOOR;
++        double breachProb = weibullBreachProbability(d.fireExposureStartTick, tick,
++            PhysicalConstants.TICK_SECONDS, ratingMinutes, shape);
++        if (random.nextDouble() < breachProb) d.blocked = true;
++        return d.blocked;
++    }
++
+     // 每個可停留格子(Floor/Stage)是否都著火：迴圈的終止條件
+     static boolean allFloorsOnFire(Space space) {
+         int height = space.height, rows = space.rows, cols = space.cols;
+@@ -304,9 +343,9 @@
+                         if (space.building[z][y][x] instanceof Stage) {
+                             Stage s = (Stage) space.building[z][y][x];
+                             Stage upT = s.upfloor != null ? findSmokeUpTarget(s) : null;
+-                            if (upT != null) nextSmoke[upT.z][upT.y][upT.x] += (0.2 * smokeMultiplier);
++                            if (upT != null && stairDoorLeaks(upT, random)) nextSmoke[upT.z][upT.y][upT.x] += (0.2 * smokeMultiplier);
+                             Stage downT = s.downfloor != null ? findSmokeDownTarget(s) : null;
+-                            if (downT != null) nextSmoke[downT.z][downT.y][downT.x] += (0.1 * smokeMultiplier);
++                            if (downT != null && stairDoorLeaks(downT, random)) nextSmoke[downT.z][downT.y][downT.x] += (0.1 * smokeMultiplier);
+                         }
+                     }
+                 }
+@@ -424,12 +463,12 @@
+                     if (source instanceof Stage) {
+                         Stage s = (Stage) source;
+                         Stage upT = s.upfloor != null ? findSmokeUpTarget(s) : null;
+-                        if (upT != null) {
++                        if (upT != null && stairDoorLeaks(upT, random)) {
+                             nextCoPpm[upT.z][upT.y][upT.x] += (0.2 * coGenerationThisTick);
+                             netConvectiveHeatKw[upT.z][upT.y][upT.x] += (0.2 * THERMAL_CROSS_FLOOR_ATTENUATION * convectiveHrrKw);
+                         }
+                         Stage downT = s.downfloor != null ? findSmokeDownTarget(s) : null;
+-                        if (downT != null) {
++                        if (downT != null && stairDoorLeaks(downT, random)) {
+                             nextCoPpm[downT.z][downT.y][downT.x] += (0.1 * coGenerationThisTick);
+                             netConvectiveHeatKw[downT.z][downT.y][downT.x] += (0.1 * THERMAL_CROSS_FLOOR_ATTENUATION * convectiveHrrKw);
+                         }
+@@ -505,9 +544,9 @@
+                     if (source instanceof Stage) {
+                         Stage s = (Stage) source;
+                         Stage upT = s.upfloor != null ? findSmokeUpTarget(s) : null;
+-                        if (upT != null) nextSmell[upT.z][upT.y][upT.x] += (0.2 * smokeMultiplier);
++                        if (upT != null && stairDoorLeaks(upT, random)) nextSmell[upT.z][upT.y][upT.x] += (0.2 * smokeMultiplier);
+                         Stage downT = s.downfloor != null ? findSmokeDownTarget(s) : null;
+-                        if (downT != null) nextSmell[downT.z][downT.y][downT.x] += (0.1 * smokeMultiplier);
++                        if (downT != null && stairDoorLeaks(downT, random)) nextSmell[downT.z][downT.y][downT.x] += (0.1 * smokeMultiplier);
+                     }
+                 }
+             }
+@@ -565,32 +604,28 @@
+                 }
+ 
+                 if (cellObj instanceof Stage) {
++                    // 【修正2，bug修正】原本的while迴圈用upFireTarget=cur不斷覆蓋，等於一路
++                    // 找到「最遠」(通常是頂層)那個還沒著火的樓層直接點燃，一tick就能跳過中間
++                    // 所有樓層；而且只要上方還有任何一層沒著火，就完全不會往下方蔓延，導致
++                    // 火勢在樓梯間裡幾乎是瞬間衝到頂樓。改成上下兩個方向都各自找「最近」一層
++                    // (跟findSmokeUpTarget/findSmokeDownTarget一致)，且要先通過該層樓梯入口的
++                    // 防火門(stairDoorFireBreaches()：Weibull耐火時效存活分布)才會真的被點燃，
++                    // 不再無條件直接燒過去。
+                     Stage s = (Stage) cellObj;
+-                    Stage upFireTarget = null;
+-                    if (s.upfloor != null) {
+-                        Stage cur = s.upfloor;
+-                        while (cur != null) {
+-                            if (!cur.fire) upFireTarget = cur;
+-                            cur = cur.upfloor;
+-                        }
++                    Stage upTarget = s.upfloor != null ? findSmokeUpTarget(s) : null;
++                    if (upTarget == null && s.upfloor != null && !s.upfloor.fire) upTarget = s.upfloor;
++                    if (upTarget != null && stairDoorFireBreaches(upTarget, tick, random)) {
++                        upTarget.fire = true;
++                        upTarget.smoke = Math.max(upTarget.smoke, 0.5);
++                        if (upTarget.ignitedAtTick < 0) upTarget.ignitedAtTick = tick;
+                     }
+ 
+-                    if (upFireTarget != null) {
+-                        upFireTarget.fire = true;
+-                        upFireTarget.smoke = Math.max(upFireTarget.smoke, 0.5);
+-                        if (upFireTarget.ignitedAtTick < 0) upFireTarget.ignitedAtTick = tick;
+-                    }
+-                    else if (s.downfloor != null) {
+-                        Stage cur = s.downfloor;
+-                        while (cur != null) {
+-                            if (!cur.fire) {
+-                                cur.fire = true;
+-                                cur.smoke = Math.max(cur.smoke, 0.5);
+-                                if (cur.ignitedAtTick < 0) cur.ignitedAtTick = tick;
+-                                break;
+-                            }
+-                            cur = cur.downfloor;
+-                        }
++                    Stage downTarget = s.downfloor != null ? findSmokeDownTarget(s) : null;
++                    if (downTarget == null && s.downfloor != null && !s.downfloor.fire) downTarget = s.downfloor;
++                    if (downTarget != null && stairDoorFireBreaches(downTarget, tick, random)) {
++                        downTarget.fire = true;
++                        downTarget.smoke = Math.max(downTarget.smoke, 0.5);
++                        if (downTarget.ignitedAtTick < 0) downTarget.ignitedAtTick = tick;
+                     }
+                 }
+             }

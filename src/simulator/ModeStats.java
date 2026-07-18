@@ -7,6 +7,8 @@ class ModeStats {
     double totalSurviveP = 0, totalDeathP = 0, totalTrappedP = 0; // 三分類比例：逃生/死亡/受困
     double highSmokeP = 0, criticalCOP = 0, wrongRouteP = 0;
     double rerouteSuccessSum = 0; int rerouteIterCount = 0;
+    // 死因比例(僅在「死亡者中」計算，只對有人死亡的場次取平均，避免被沒人死亡的場次拉低)
+    double fireDeathCauseSum = 0, coDeathCauseSum = 0; int deathCauseIterCount = 0;
     double vulnerableIdSum = 0; int vulnerableIterCount = 0;
     double avgEscapeTickSum = 0; int escapeTickIterCount = 0;      // RSET(以點火為基準，僅計入成功逃生者)
     double revokeToRerouteSum = 0; int revokeToRerouteIterCount = 0;   // 建議撤回→改道完成 延遲
@@ -26,6 +28,8 @@ class ModeStats {
         this.criticalCOP += source.criticalCOP;
         this.wrongRouteP += source.wrongRouteP;
         this.rerouteSuccessSum += source.rerouteSuccessSum; this.rerouteIterCount += source.rerouteIterCount;
+        this.fireDeathCauseSum += source.fireDeathCauseSum; this.coDeathCauseSum += source.coDeathCauseSum;
+        this.deathCauseIterCount += source.deathCauseIterCount;
         this.vulnerableIdSum += source.vulnerableIdSum; this.vulnerableIterCount += source.vulnerableIterCount;
         this.avgEscapeTickSum += source.avgEscapeTickSum; this.escapeTickIterCount += source.escapeTickIterCount;
         this.revokeToRerouteSum += source.revokeToRerouteSum; this.revokeToRerouteIterCount += source.revokeToRerouteIterCount;

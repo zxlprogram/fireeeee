@@ -16,6 +16,7 @@ class SimResult {
     boolean[] isVulnerableProfile;  // 此人本身是否屬於「行動不便/年長者」這類需優先協助對象
     int[] revokeToRerouteTicks;   // 建議被撤回後到拿到下一筆建議所花的tick，-1代表本人從未發生撤回
     int[] firstCueTick;      // 第一次察覺(聞到煙味/看到煙火/系統示警)的tick，-1代表整場都沒察覺
+    DeathCause[] deathCauses; // 死因(燒死/CO中毒)，只有outcomes[i]==DEAD時才有意義，其餘為NONE
 
     SimResult(int n) {
         times = new int[n];
@@ -29,9 +30,11 @@ class SimResult {
         isVulnerableProfile = new boolean[n];
         revokeToRerouteTicks = new int[n];
         firstCueTick = new int[n];
+        deathCauses = new DeathCause[n];
         Arrays.fill(outcomes, Outcome.TRAPPED); // 預設：模擬結束時還沒死也還沒逃出去
         Arrays.fill(revokeToRerouteTicks, -1);
         Arrays.fill(firstCueTick, -1);
+        Arrays.fill(deathCauses, DeathCause.NONE);
     }
 
     // 依據 People 目前狀態，把單一個體的所有KPI旗標寫入對應索引
@@ -48,5 +51,6 @@ class SimResult {
         isVulnerableProfile[idx] = (p.profile == PersonProfile.IMPAIRED || p.profile == PersonProfile.ELDERLY);
         revokeToRerouteTicks[idx] = (p.kpi.revokeToRerouteTicks != null) ? p.kpi.revokeToRerouteTicks : -1;
         firstCueTick[idx] = (p.firstCueAt != null) ? p.firstCueAt : -1;
+        deathCauses[idx] = p.deathCause;
     }
 }
