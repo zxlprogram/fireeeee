@@ -363,76 +363,19 @@ public class Simulator implements SimulationContext {
             int cols   = buildingRand.nextInt(C.max - C.min) + C.min;
 
             Obj[][][] baseBuilding = BuildingGenerator.generateMap(height, rows, cols);
-            Space tempSpace = new Space(baseBuilding);
-            int maxArea = (rows - 2) * (cols - 2);
-            if (maxArea < 1) maxArea = 1;
 
             // 每個建築類型自己的統計容器：先歸零，這棟樓的所有場景都算完再印小結、再併入全域總表
             for (SimMode m : SimMode.values()) statsByMode.put(m, new ModeStats());
-            double buildingSmartWrong = 0, buildingHybridWrong = 0;
-            long buildingPeopleSum = 0;
 
             System.err.println("\n################################################");
             System.err.printf("建築類型 #%d ：%d 層 × %d × %d\n", bt + 1, height, rows, cols);
             System.err.println("################################################");
 
-            for (int sc = 0; sc < count; sc++) {
-                System.err.println("-- 場景 " + (sc + 1) + "/" + count + " --");
-                Random rand = new Random();
-                currentCause = data[bt].cause;
-                System.err.println("起火原因: " + currentCause);
-
-                // 同一棟建築(baseBuilding幾何不變)，每個場景各自重抽一個新的火源位置
-                int fireZ = rand.nextInt(tempSpace.height);
-                int fireY = rand.nextInt(tempSpace.rows);
-                int fireX = rand.nextInt(tempSpace.cols);
-                while (!(baseBuilding[fireZ][fireY][fireX] instanceof Floor)) {
-                    fireY = rand.nextInt(tempSpace.rows);
-                    fireX = rand.nextInt(tempSpace.cols);
-                }
-
-                // 以及各自重抽一組新的人物資訊(人數與位置)
-                int peopleCount = Math.max(((rand.nextInt(maxArea) + 1) / 4), 1);
-                TotalPeopleSum += peopleCount;
-                buildingPeopleSum += peopleCount;
-
-                int[][] peopleInit = new int[peopleCount][4];
-                for (int i = 0; i < peopleCount; i++) {
-                    while (true) {
-                        int z = rand.nextInt(tempSpace.height);
-                        int y = rand.nextInt(tempSpace.rows);
-                        int x = rand.nextInt(tempSpace.cols);
-                        if (baseBuilding[z][y][x] instanceof Floor) {
-                            peopleInit[i] = new int[]{ z, y, x, rand.nextInt(3) + 1 };
-                            break;
-                        }
-                    }
-                }
-
-                // 取得每個個體在三種情境下的模擬結果（時間 + 真實結局）：
-                //   DEFAULT - 無智慧系統(基準線)
-                //   SMART   - 只有決策支援(B1)
-                //   HYBRID  - 決策支援 + 備援控制(B2)
-                SimResult defaultResult = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.DEFAULT, "defaultResult.txt");
-                SimResult smartResult   = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.SMART,   "smartResult.txt");
-                SimResult hybridResult  = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.HYBRID,  "hybridResult.txt");
-
-                // 統計「系統做錯決定」的人數：定義為「結果比原本(DEFAULT)更差」
-                for (int i = 0; i < peopleCount; i++) {
-                    boolean defaultSurvived = defaultResult.outcomes[i] == Outcome.ESCAPED;
-                    boolean smartSurvived   = smartResult.outcomes[i] == Outcome.ESCAPED;
-                    boolean hybridSurvived  = hybridResult.outcomes[i] == Outcome.ESCAPED;
-
-                    if (defaultSurvived && !smartSurvived)  { smartWrongDecisionCount++;  buildingSmartWrong++; }
-                    if (defaultSurvived && !hybridSurvived) { hybridWrongDecisionCount++; buildingHybridWrong++; }
-                }
-
-                globalScenarioCount++;
-            }
+            BuildingRunSummary summary = runScenariosForBuilding(baseBuilding, data[bt].cause, height, rows, cols, count);
 
             // 印出「這個建築類型」的小結報表(只彙整這一棟樓、多個火源/人員場景的結果)
             ReportGenerator.printReport("建築類型 #" + (bt + 1) + " (" + height + "層 × " + rows + "×" + cols + ") 小結",
-                statsByMode, count, buildingSmartWrong, buildingHybridWrong, buildingPeopleSum);
+                statsByMode, count, summary.smartWrong, summary.hybridWrong, summary.peopleSum);
 
             // 時間複雜度量測：這個建築類型從開始到結束總共花了多少毫秒，
             // 除以(count場景數 × 建築體積(height*rows*cols))，得到「每單位(場景數×體積)平均花費的毫秒數」
@@ -443,11 +386,152 @@ public class Simulator implements SimulationContext {
             System.err.printf("執行時間: %.3f ms，體積: %d，時間複雜度量測(ms ÷ (count×體積)) : %.10f ms/unit\n",
                 buildingElapsedMs, buildingVolume, msPerUnit);
 
+            smartWrongDecisionCount  += summary.smartWrong;
+            hybridWrongDecisionCount += summary.hybridWrong;
+            globalScenarioCount      += summary.scenarioCount;
+
             // 把這棟樓的統計併入跨建築類型的總表
             for (SimMode m : SimMode.values()) globalStats.get(m).mergeFrom(statsByMode.get(m));
         }
 
         // 印出跨所有建築類型的總表
         ReportGenerator.printReport("跨建築類型總表", globalStats, globalScenarioCount, smartWrongDecisionCount, hybridWrongDecisionCount, TotalPeopleSum);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 自訂房型入口：跟 work(Data[], int) 唯一的差別，只在「這棟建築怎麼來」——
+    // 不呼叫 BuildingGenerator.generateMap() 隨機生成，改用 CustomRoomParser
+    // 解析使用者手動輸入的三維字串陣列(可多樓層，字元對照表見
+    // CustomRoomParser.java檔頭註解)。取得baseBuilding之後，起火點/人物抽樣、
+    // DEFAULT/SMART/HYBRID三種模式各跑一次run()、統計彙整、報表列印，全部呼叫
+    // 跟work(Data[], int)完全相同的 runScenariosForBuilding()，行為不變。
+    //
+    //   layout ─ 使用者輸入的房型佈局，layout[z][y][x]即該格符號(見CustomRoomParser)，
+    //             z=樓層(z越大代表越高樓層)、y=列、x=行
+    //   cause  ─ 這個自訂房型要模擬的起火原因(對應原本Data.cause)
+    //   count  ─ 這個房型要重抽幾組不同的起火點+人物配置來跑(對應原本work()的count)
+    // ═══════════════════════════════════════════════════════════════════════
+    public void workCustomRoom(String[][][] layout, FireCause cause, int count) {
+        TotalPeopleSum = 0;
+
+        long buildingStartNano = System.nanoTime();
+
+        Obj[][][] baseBuilding = CustomRoomParser.parse(layout);
+        int height = baseBuilding.length, rows = baseBuilding[0].length, cols = baseBuilding[0][0].length;
+
+        // 對齊 BuildingGenerator.generateMap() 尾段(§6可燃物分布、§7統計列印)，
+        // 讓自訂房型跟隨機生成房型的後續行為完全一致，只有「怎麼決定牆/門/出口
+        // /樓梯的位置」這一步被使用者輸入取代。
+        BuildingGenerator.distributeFuelLoads(baseBuilding, height, rows, cols, new Random());
+        BuildingGenerator.printCompartmentStats(baseBuilding, height, rows, cols);
+
+        for (SimMode m : SimMode.values()) statsByMode.put(m, new ModeStats());
+
+        System.err.println("\n################################################");
+        System.err.printf("自訂房型：%d 層 × %d × %d\n", height, rows, cols);
+        System.err.println("################################################");
+
+        BuildingRunSummary summary = runScenariosForBuilding(baseBuilding, cause, height, rows, cols, count);
+
+        ReportGenerator.printReport("自訂房型模擬報表", statsByMode, count, summary.smartWrong, summary.hybridWrong, summary.peopleSum);
+
+        long buildingEndNano = System.nanoTime();
+        double buildingElapsedMs = (buildingEndNano - buildingStartNano) / 1_000_000.0;
+        long buildingVolume = (long) height * rows * cols;
+        double msPerUnit = buildingElapsedMs / (count * buildingVolume);
+        System.err.printf("執行時間: %.3f ms，體積: %d，時間複雜度量測(ms ÷ (count×體積)) : %.10f ms/unit\n",
+            buildingElapsedMs, buildingVolume, msPerUnit);
+        // 註：TotalPeopleSum在runScenariosForBuilding()內已經逐場景累加完成，這裡不需要再處理。
+    }
+
+    // 單層房型的便利多載：包成 height=1 的三維陣列後直接呼叫上面那個。
+    public void workCustomRoom(String[][] singleFloorLayout, FireCause cause, int count) {
+        workCustomRoom(new String[][][]{ singleFloorLayout }, cause, count);
+    }
+
+    // ─── work(Data[],int) 與 workCustomRoom(...) 共用：同一棟建築(baseBuilding
+    // 幾何不變)重抽count組不同的起火點+人物配置各跑一次，回傳這棟建築彙整後的
+    // 統計數字，供呼叫端印小結報表、併入全域總表。內容完全對應原本work()裡
+    // for(int sc...)這段迴圈，行為未變更，只是抽成方法讓兩個入口重用。
+    private BuildingRunSummary runScenariosForBuilding(Obj[][][] baseBuilding, FireCause cause,
+                                                         int height, int rows, int cols, int count) {
+        Space tempSpace = new Space(baseBuilding);
+        int maxArea = (rows - 2) * (cols - 2);
+        if (maxArea < 1) maxArea = 1;
+
+        double buildingSmartWrong = 0, buildingHybridWrong = 0;
+        long buildingPeopleSum = 0;
+        int scenarioCount = 0;
+
+        for (int sc = 0; sc < count; sc++) {
+            System.err.println("-- 場景 " + (sc + 1) + "/" + count + " --");
+            Random rand = new Random();
+            currentCause = cause;
+            System.err.println("起火原因: " + currentCause);
+
+            // 同一棟建築(baseBuilding幾何不變)，每個場景各自重抽一個新的火源位置
+            int fireZ = rand.nextInt(tempSpace.height);
+            int fireY = rand.nextInt(tempSpace.rows);
+            int fireX = rand.nextInt(tempSpace.cols);
+            while (!(baseBuilding[fireZ][fireY][fireX] instanceof Floor)) {
+                fireY = rand.nextInt(tempSpace.rows);
+                fireX = rand.nextInt(tempSpace.cols);
+            }
+
+            // 以及各自重抽一組新的人物資訊(人數與位置)
+            int peopleCount = Math.max(((rand.nextInt(maxArea) + 1) / 4), 1);
+            TotalPeopleSum += peopleCount;
+            buildingPeopleSum += peopleCount;
+
+            int[][] peopleInit = new int[peopleCount][4];
+            for (int i = 0; i < peopleCount; i++) {
+                while (true) {
+                    int z = rand.nextInt(tempSpace.height);
+                    int y = rand.nextInt(tempSpace.rows);
+                    int x = rand.nextInt(tempSpace.cols);
+                    if (baseBuilding[z][y][x] instanceof Floor) {
+                        peopleInit[i] = new int[]{ z, y, x, rand.nextInt(3) + 1 };
+                        break;
+                    }
+                }
+            }
+
+            // 取得每個個體在三種情境下的模擬結果（時間 + 真實結局）：
+            //   DEFAULT - 無智慧系統(基準線)
+            //   SMART   - 只有決策支援(B1)
+            //   HYBRID  - 決策支援 + 備援控制(B2)
+            SimResult defaultResult = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.DEFAULT, "defaultResult.txt");
+            SimResult smartResult   = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.SMART,   "smartResult.txt");
+            SimResult hybridResult  = runOneSimulation(baseBuilding, peopleInit, fireZ, fireY, fireX, SimMode.HYBRID,  "hybridResult.txt");
+
+            // 統計「系統做錯決定」的人數：定義為「結果比原本(DEFAULT)更差」
+            for (int i = 0; i < peopleCount; i++) {
+                boolean defaultSurvived = defaultResult.outcomes[i] == Outcome.ESCAPED;
+                boolean smartSurvived   = smartResult.outcomes[i] == Outcome.ESCAPED;
+                boolean hybridSurvived  = hybridResult.outcomes[i] == Outcome.ESCAPED;
+
+                if (defaultSurvived && !smartSurvived)  { buildingSmartWrong++; }
+                if (defaultSurvived && !hybridSurvived) { buildingHybridWrong++; }
+            }
+
+            scenarioCount++;
+        }
+
+        return new BuildingRunSummary(buildingSmartWrong, buildingHybridWrong, buildingPeopleSum, scenarioCount);
+    }
+
+    // 單一建築(不論隨機生成或自訂房型)跑完count個場景後的彙整結果。
+    private static final class BuildingRunSummary {
+        final double smartWrong;
+        final double hybridWrong;
+        final long peopleSum;
+        final int scenarioCount;
+
+        BuildingRunSummary(double smartWrong, double hybridWrong, long peopleSum, int scenarioCount) {
+            this.smartWrong = smartWrong;
+            this.hybridWrong = hybridWrong;
+            this.peopleSum = peopleSum;
+            this.scenarioCount = scenarioCount;
+        }
     }
 }

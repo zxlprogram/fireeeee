@@ -268,7 +268,10 @@ class BuildingGenerator {
         FuelType.WOOD, FuelType.WOOD, FuelType.PAPER, FuelType.PU_FOAM, FuelType.PVC
     };
 
-    private static void distributeFuelLoads(Obj[][][] obj, int height, int rows, int cols, Random rand) {
+    // 【原為private】改成package-private，讓CustomRoomParser在自訂房型(手動輸入
+    // 佈局、跳過generateMap()前段的隨機房間/樓梯/出口生成)之後，仍能重用同一套
+    // 可燃物分布邏輯，維持跟隨機生成房型完全一致的後續行為。
+    static void distributeFuelLoads(Obj[][][] obj, int height, int rows, int cols, Random rand) {
         for (int z = 0; z < height; z++) {
             for (int y = 0; y < rows; y++) {
                 for (int x = 0; x < cols; x++) {
@@ -276,6 +279,7 @@ class BuildingGenerator {
                     // 只在一般樓地板上鋪可燃物；門/牆/樓梯間/出口本身不是「家具/建材
                     // 堆積區」的概念，維持fuel=null(不可燃/無額外燃料負載)保底。
                     if (!(cell instanceof Floor)) continue;
+                    if (cell.fuel != null) continue; // 已經被明確指定過可燃物(例如自訂房型的🪵)，不覆蓋
                     if (rand.nextDouble() >= FUEL_COVERAGE_PROBABILITY) continue; // 這一格保持空白(沒有可燃物)
                     cell.fuel = AMBIENT_FUEL_POOL[rand.nextInt(AMBIENT_FUEL_POOL.length)];
                 }
@@ -283,7 +287,8 @@ class BuildingGenerator {
         }
     }
 
-    private static void printCompartmentStats(Obj[][][] obj, int height, int rows, int cols) {
+    // 【原為private】理由同distributeFuelLoads()。
+    static void printCompartmentStats(Obj[][][] obj, int height, int rows, int cols) {
         int[] dy = {-1, 1, 0, 0};
         int[] dx = {0, 0, -1, 1};
 

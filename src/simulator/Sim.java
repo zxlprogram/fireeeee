@@ -6,13 +6,10 @@ class sim {
         Simulator s = new Simulator();
         //輸入:建築類型數量、每個建築類型要跑幾組火源/人物場景、樓高範圍、樓寬範圍、樓長範圍
         //輸出:每個建築類型的小結報表、跨建築類型總表、過程文檔(會隨著模擬次數被覆蓋，只會看到最後一次模擬的文檔)
-        //注意事項:時間複雜度超大，平均每個格子需要計算0.183324742*大樓體積^(4/3) 毫秒
+        //注意事項:時間複雜度超大，平均每個格子需要計算k*大樓體積^(4/3) 毫秒
         //         總場景數 = 建築類型數量 × 每個建築類型的場景數，請自行斟酌調整
-        Data[] data = new Data[2];
-        data[0] = new Data(new Range(5, 6), new Range(24, 25), new Range(24, 25),FireCause.ELECTRICAL);
-        data[1] = new Data(new Range(5, 6), new Range(24, 25), new Range(24, 25),FireCause.CHEMICAL);
-        
-        s.work(data, 5);
+        String[][][] layout = CustomRoomTextLoader.loadFromFile("C:\\Users\\user\\Desktop\\personal work\\火災救災智慧系統量化模擬器\\src\\simulator\\custom_room_example.txt");
+        s.workCustomRoom(layout, FireCause.ACCIDENTAL, 5); // 用這個5層房型重抽5組起火點/人物場景
     }
 }
 
