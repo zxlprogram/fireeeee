@@ -235,10 +235,52 @@ class BuildingGenerator {
             for (int[] c : chosenExits) obj[z][c[0]][c[1]] = new Exit();
         }
 
-        // 6. 印出統計
+        // 6. 隨機分布可燃物：只在「一般樓地板(Floor)」上鋪設，門/牆/樓梯/出口
+        // 不放，且不是每一格Floor都有——見distributeFuelLoads()註解。放在樓梯/
+        // 出口都已配置完成之後，確保不會對已經變成Stage/Exit的格子誤植可燃物。
+        distributeFuelLoads(obj, height, rows, cols, rand);
+
+        // 7. 印出統計
         printCompartmentStats(obj, height, rows, cols);
 
         return obj;
+    }
+
+    // ─── 可燃物隨機分布 ─────────────────────────────────────────────
+    // 【新增，回應「可燃物隨機分布在每個空白區域」需求】把FuelType隨機灑在部分
+    // Floor格上，模擬室內家具/建材分布不均勻的真實情況：有些地方(例如堆滿家具、
+    // 沙發、紙箱的房間)可燃物濃度高，有些地方(例如淨空的走道、大廳)幾乎沒有
+    // 可燃物。這個分布只在地圖生成時決定一次，之後隨模擬過程被逐格燒毀
+    // (fire=true)，不會中途重新洗牌。
+    //
+    // 覆蓋率與燃料組成都是工程判斷取的合理量級，不是逐一文獻校正的精確值
+    // (定位比照FuelType.java檔頭註解「先把資料結構撐起來」的態度)：
+    //   - FUEL_COVERAGE_PROBABILITY：約半數樓地板格鋪有可燃物，另一半視為
+    //     相對淨空的走道/通道/已清空區域，讓「有些地方有、有些地方沒有」
+    //     這件事真的在地圖上呈現出斑駁分布，而不是均勻鋪滿。
+    //   - AMBIENT_FUEL_POOL：一般室內環境常見的固態可燃物組成(木質家具/紙類
+    //     /泡棉家具填充物/PVC電線管材)，木材出現頻率加倍反映其在室內佔比通常
+    //     最高；刻意不含GASOLINE，因為汽油是可燃「液體」，不會隨機平鋪在一般
+    //     房間格子裡當環境背景可燃物，仍只透過FireCause.representativeFuel
+    //     (化學/縱火起火)在起火點本身出現。
+    private static final double FUEL_COVERAGE_PROBABILITY = 0.5;
+    private static final FuelType[] AMBIENT_FUEL_POOL = {
+        FuelType.WOOD, FuelType.WOOD, FuelType.PAPER, FuelType.PU_FOAM, FuelType.PVC
+    };
+
+    private static void distributeFuelLoads(Obj[][][] obj, int height, int rows, int cols, Random rand) {
+        for (int z = 0; z < height; z++) {
+            for (int y = 0; y < rows; y++) {
+                for (int x = 0; x < cols; x++) {
+                    Obj cell = obj[z][y][x];
+                    // 只在一般樓地板上鋪可燃物；門/牆/樓梯間/出口本身不是「家具/建材
+                    // 堆積區」的概念，維持fuel=null(不可燃/無額外燃料負載)保底。
+                    if (!(cell instanceof Floor)) continue;
+                    if (rand.nextDouble() >= FUEL_COVERAGE_PROBABILITY) continue; // 這一格保持空白(沒有可燃物)
+                    cell.fuel = AMBIENT_FUEL_POOL[rand.nextInt(AMBIENT_FUEL_POOL.length)];
+                }
+            }
+        }
     }
 
     private static void printCompartmentStats(Obj[][][] obj, int height, int rows, int cols) {
@@ -340,6 +382,7 @@ class BuildingGenerator {
                     }
                     n.fire  = o.fire;
                     n.smoke = o.smoke;
+                    n.fuel  = o.fuel; // 【新增】可燃物種類也要跟著複製，否則clone後的地圖會全部變回無燃料
                     dst[z][y][x] = n;
                 }
             }

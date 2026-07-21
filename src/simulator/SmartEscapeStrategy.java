@@ -36,19 +36,26 @@ class SmartEscapeStrategy implements EscapeStrategy {
         // 火/危險格跑一次連通性檢查，「目前位置→任務目標格」不再存在安全路徑才撤回。
         if (p.targetStage != null) {
             boolean fireHit = p.targetStage.fire;
+            // 【P1-2 修正】跨樓層任務(targetStage)原本沒有任何逾時保護，只有同樓層任務
+            // (junctionTargetPos，見下面else if分支)有ADVICE_SAFETY_CAP_TICKS這個逾時
+            // 重規劃保護，邏輯不對稱，可能導致人長時間卡在一個次優/過期的跨樓層任務裡
+            // 動彈不得。比照junctionTargetPos的判定方式，補上對稱的逾時檢查。
+            boolean safetyCapHit = p.kpi.adviceIssuedTick != null
+                && (currentTick - p.kpi.adviceIssuedTick) > People.ADVICE_SAFETY_CAP_TICKS;
             boolean lostConnectivity = false;
-            if (!fireHit) {
-                RouteFinder.HazardKnowledge hk = p.routeFinder.gatherKnownHazards(p.z, p.y, p.x, p.profile);
+            if (!fireHit && !safetyCapHit) {
+                RouteFinder.HazardKnowledge hk = p.routeFinder.gatherKnownHazards(p.z, p.y, p.x, p.profile, currentTick);
                 lostConnectivity = !p.routeFinder.isReachable(p.z, p.y, p.x, p.targetStage.z, p.targetStage.y, p.targetStage.x,
                     hk.knownFires, hk.knownHazards);
             }
-            if (fireHit || lostConnectivity) {
-                // 【建議撤回】目標樓梯間著火，或已知資訊顯示這條路已經不通了，視為系統主動撤回這筆建議，
-                // 下個tick重新規劃改道；記錄撤回時間，用於統計「撤回後多久才拿到新建議」
+            if (fireHit || lostConnectivity || safetyCapHit) {
+                // 【建議撤回】目標樓梯間著火、已知資訊顯示這條路已經不通了、或任務已經逾時，
+                // 視為系統主動撤回這筆建議，下個tick重新規劃改道；記錄撤回時間，用於統計
+                // 「撤回後多久才拿到新建議」
                 if (p.kpi.adviceRevokedTick == null) p.kpi.adviceRevokedTick = currentTick;
                 System.out.println("[ADVICE-REVOKE][SMART] tick=" + currentTick
                     + " id=" + p.id
-                    + " reason=" + (fireHit ? "ENV_CHANGE" : "CONNECTIVITY_LOST")
+                    + " reason=" + (fireHit ? "ENV_CHANGE" : (safetyCapHit ? "SAFETY_CAP" : "CONNECTIVITY_LOST"))
                     + " issuedTick=" + p.kpi.adviceIssuedTick
                     + " pos=(" + p.z + "," + p.y + "," + p.x + ")"
                     + " selfSmoke=" + String.format("%.2f", p.space.building[p.z][p.y][p.x].smoke)
@@ -74,7 +81,7 @@ class SmartEscapeStrategy implements EscapeStrategy {
                 && (currentTick - p.kpi.adviceIssuedTick) > People.ADVICE_SAFETY_CAP_TICKS;
             boolean lostConnectivity = false;
             if (!fireHit && !safetyCapHit) {
-                RouteFinder.HazardKnowledge hk = p.routeFinder.gatherKnownHazards(p.z, p.y, p.x, p.profile);
+                RouteFinder.HazardKnowledge hk = p.routeFinder.gatherKnownHazards(p.z, p.y, p.x, p.profile, currentTick);
                 lostConnectivity = !p.routeFinder.isReachable(p.z, p.y, p.x,
                     p.junctionTargetPos[0], p.junctionTargetPos[1], p.junctionTargetPos[2],
                     hk.knownFires, hk.knownHazards);
@@ -184,6 +191,15 @@ class SmartEscapeStrategy implements EscapeStrategy {
                 // 系統建議的路線，實際走到時才發現煙霧已經超標(感測器/資訊延遲)——
                 // 只在「這一步剛好從乾淨格走進濃煙格」的瞬間記一次。
                 p.kpi.everWrongRoute = true;
+                // 【校正清單 追加項§3】比照instinctiveEscapeStep()：發現走進超標濃煙格時，
+                // 不硬走完整段快取路徑(junctionPath)，立刻中止本tick剩餘的走位，改用
+                // randomMove()打斷；同時清空junctionTargetPos/junctionPath，讓下個tick
+                // 一開始就經由 planNextAdvice() 重新規劃，而不是等抵達原本快取路徑的
+                // 決策點才重新規劃。
+                p.junctionTargetPos = null; p.junctionPath = null; p.junctionPathIdx = 0;
+                p.kpi.adviceIssuedTick = null;
+                p.randomMove(speed - step - 1);
+                break;
             }
             inHazardNow = nowInSmoke;
 

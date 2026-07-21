@@ -138,7 +138,7 @@ public class Simulator implements SimulationContext {
         // 讓煙霧/火勢真的擴散、人員真的有機會行動。
         do {
             tick++;
-            activeControlActionCount += EnvironmentSimulator.spread(space, currentCause, tick, activeControlEnabled, random);
+            activeControlActionCount += EnvironmentSimulator.spread(space, currentCause, tick, activeControlEnabled, random, peopleList);
 
             // 【校正清單§1/§12】每tick開頭重置門/出口的通過流量瓶頸容量，
             // 見DoorFlowModel。要放在People行動之前，才能讓這個tick的移動判斷
@@ -287,7 +287,7 @@ public class Simulator implements SimulationContext {
         System.err.println("Mode: " + mode + ", total: " + totalPeople + ", survive: " + survive);
 
         // 匯出本場模擬的 Session JSON(靜態地圖/逐tick快照/事件日誌)
-        sessionExporter.exportToFile(sessionJsonFilename);
+        //sessionExporter.exportToFile(sessionJsonFilename);
 
         return result;
     }

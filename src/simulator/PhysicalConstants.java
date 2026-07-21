@@ -66,6 +66,14 @@ final class PhysicalConstants {
     static final double FED_INCAPACITATION = 0.3; // FED_CO達到0.3視為失能門檻(校正清單§5/§10)
     static final double FED_LETHAL = 1.0;          // FED_CO達到1.0視為致死劑量(對應個人%COHb臨界值)
 
+    // 【新增，回應審查意見：ASET四判据的CO判定應改用累積FED而非瞬時IDLH門檻】
+    // 健康成年人的預設易感度D，跟People.java建構子裡對一般人群設的
+    // coSusceptibilityD=40.0是同一個量級/同一份文獻假設，供
+    // EnvironmentSimulator.spread()計算「這個位置」的代表性fedCoCell使用
+    // (見WorldObjects.Obj.fedCoCell)。刻意不取兒童/老人等易感族群較低的D值，
+    // 因為這是環境本身的危害嚴重度判定，不是特定某個人的暴露史。
+    static final double CO_SUSCEPTIBILITY_D_DEFAULT = 40.0;
+
     // ─── §5b 熱暴露致死劑量：Purser對流熱耐受時間模型 ────────────────────
     // 【修正】原本「踩到火格=這個tick立刻死亡」是跟現實脫節的硬編碼判定：文獻
     // 上火災死亡平均只有約20~40%是燒傷致死，多數其實死於CO/煙霧吸入，但「碰到
@@ -85,6 +93,19 @@ final class PhysicalConstants {
     static final double FED_THERMAL_TOLERANCE_A = 5.1849;
     static final double FED_THERMAL_TOLERANCE_B = 0.0273;
     static final double FED_THERMAL_LETHAL = 1.0; // 跟FED_CO一樣，達到1.0視為致死劑量
+
+    // 【修正，校正清單問題4】Purser公式實證範圍約80~150°C，超出這個範圍屬於
+    // 數學外推，沒有實證支持。溫度場全盛期可到COMPARTMENT_PEAK_GAS_TEMP_C(850°C)，
+    // 若讓指數公式無界外推，t_I在數學上仍「合理」(趨近於0)，但這個極短耐受時間
+    // 只是外推假象，不是真的有實驗量到這個數字。
+    // 做法：超過THERMAL_TOLERANCE_EXTRAPOLATION_CAP_C(200°C，比公式驗證上限
+    // 150°C留一點緩衝)之後，不再用公式算t_I，直接視為「近乎瞬間失能/致死」——
+    // 用THERMAL_TOLERANCE_FLOOR_MINUTES(公式在200°C時算出的t_I，約0.76分鐘/
+    // 46秒)當作耐受時間下限，數值上跟外推結果相近，但邏輯上是「明確判定」
+    // 而非「指數公式無限外推」，見People.absorbThermal()。
+    static final double THERMAL_TOLERANCE_EXTRAPOLATION_CAP_C = 200.0;
+    static final double THERMAL_TOLERANCE_FLOOR_MINUTES =
+        Math.exp(FED_THERMAL_TOLERANCE_A - FED_THERMAL_TOLERANCE_B * THERMAL_TOLERANCE_EXTRAPOLATION_CAP_C);
 
     // 呼吸每分鐘通氣量(RMV, L/min)：靜止~輕度活動落在文獻常見的6~25範圍，
     // 劇烈活動/恐慌可達50以上；這裡依panicLevel在輕度活動與劇烈活動間內插。
@@ -132,6 +153,12 @@ final class PhysicalConstants {
     //     一般門構造/密封更不一致，失效時間分散度較大
     static final double FIREDOOR_RATING_MINUTES = 60.0;
     static final double DOOR_UNRATED_EQUIVALENT_MINUTES = 15.0;
+    // ⚠️無文獻對應：以下兩個形狀參數(k)在目前搜尋範圍內找不到可直接引用的
+    // 出處，純屬工程判斷(方向合理——防火門經標準試驗認證，失效行為更接近
+    // 「額定時間到才失效」，形狀曲線應較陡；一般門構造/密封不一致，分散度
+    // 較大，形狀曲線應較平)，但4.0/2.0這兩個具體數值沒有實測失效機率分布
+    // 校準過。若要更嚴謹，應查BS EN 1634 / ISO 834相關失效機率研究反推，
+    // 目前先維持此工程假設值。
     static final double WEIBULL_SHAPE_FIREDOOR = 4.0;
     static final double WEIBULL_SHAPE_NORMALDOOR = 2.0;
 
@@ -261,4 +288,174 @@ final class PhysicalConstants {
     static final double ACH_PARTIALLY_OPEN = 2.0;
     static final double ACH_OPEN_ROOM = 8.0;
     static final double ACH_STAIR_OR_SMOKE_CONTROL = 12.0;
+
+    // ─── §13 煙霧模型重構：Fick's Second Law擴散 + 生成常數 ──────────────
+    // 【煙霧模型重構，取代原本的smokeGrowth()/固定距離權重/樓梯固定增量】
+    //
+    // 關於Smoke Yield(Y_s)與Heat of Combustion(ΔHc)：這兩個量「已經」存在於
+    // FuelType.java裡(分別是sootYield與heatOfCombustionMJPerKg)，且FuelType
+    // 的sootYield欄位註解早已寫明是為了「之後能見度/煙層濃度模型使用」而準備
+    // 的——這正是本次要做的事。因此這裡刻意不在PhysicalConstants另外重複定義
+    // 一份全域SMOKE_YIELD/HEAT_OF_COMBUSTION常數：那樣會造成兩份互相打架的
+    // 燃料資料(一份依燃料種類細分，一份是不分燃料的單一數字)，也違背Prompt
+    // §十一「不可Smoke算一次、CO再算一次」的精神——CO跟煙霧本來就該共用同一份
+    // 「燃料是什麼、燒得多快」的資料，而不是各自維護一份。實際使用見
+    // EnvironmentSimulator.spread()：Y_s = fuel.sootYield，ΔHc已內含在
+    // FireChemistry.getMassLossRate(hrrKw, fuel)裡。
+
+    /**
+     * 煙霧(soot)擴散係數 D，單位 m²/s。
+     *
+     * 真正的分子擴散係數(molecular diffusivity)對氣體/微粒而言只有約
+     * 1e-5 m²/s量級，在室內火場的時間/空間尺度下幾乎可忽略——實際上煙霧
+     * 在房間/走廊裡的傳播主要由熱浮力驅動的紊流(turbulent/eddy diffusion)
+     * 主導，而非純分子擴散。這裡取消防工程/室內氣流模擬常引用的紊流渦流
+     * 擴散係數量級(約0.01~0.1 m²/s)中段，作為這個簡化網格模型「有效擴散
+     * 係数」的合理近似，取代原本完全沒有物理依據的固定距離權重。
+     */
+    static final double SMOKE_DIFFUSIVITY = 0.02;
+
+    /**
+     * 樓梯間煙囪效應(stack effect)係数，無因次。
+     *
+     * 樓梯間/豎井因為室內外溫差造成的浮力壓差(stack effect / chimney
+     * effect，NFPA 92常見討論主題)，會讓煙霧沿垂直方向的傳播速度遠高於
+     * 同層房間內單純的紊流擴散——這裡把樓梯間的垂直擴散係数表示成
+     * D_z = STACK_COEFFICIENT × SMOKE_DIFFUSIVITY，STACK_COEFFICIENT取一個
+     * 反映「樓梯間垂直傳播明顯快於同層水平擴散」但仍是同一套Fick擴散架構
+     * 的放大倍率，量級參考樓梯間/加壓排煙系統ACH(ACH_STAIR_OR_SMOKE_CONTROL)
+     * 相對於密閉房間ACH(ACH_CLOSED_ROOM)的比值(12/0.5=24，取同一個量級的
+     * 保守下緣)。
+     */
+    static final double STACK_COEFFICIENT = 8.0;
+
+    /**
+     * 煙塵質量消光係数(specific extinction area) Dm，單位 m²/kg。
+     *
+     * 用來把生成的煙塵質量濃度(kg/m³)換算成消光係数K(1/m)：
+     *   K = Dm × 煙塵質量濃度(kg/m³)
+     * 取SFPE Handbook(Mulholland, "Smoke Production and Properties"一章)
+     * 常引用的燃燒生成煙塵quantitative值量級(約數千 m²/kg)，換算出的K再
+     * 透過既有的VISIBILITY_K_AT_SMOKE_1假設(smoke=1.0時K≈2.0/m)對應回
+     * 目前程式沿用的0~1煙霧(能見度危害代理量)指標，讓「生成的煙塵質量」
+     * 跟「既有的smoke數值尺度」之間有一個可追溯的物理換算，而不是憑空
+     * 決定一個生成速率。
+     */
+    static final double SMOKE_MASS_EXTINCTION_COEFFICIENT_M2_PER_KG = 7600.0;
+
+    // ─── §14 門的孔口流量洩漏模型：取代「穿越機率」常數 ──────────────────
+    // 【校正清單§14，取代原本EnvironmentSimulator.SMOKE_SPREAD_PROB_FIREDOOR/
+    // NORMALDOOR、SMELL_SPREAD_PROB_FIREDOOR/NORMALDOOR這四個沒有文獻依據的
+    // 「每tick穿越機率」常數(0.45/0.65/0.75/0.90，純工程猜測)】
+    //
+    // 消防工程文獻裡沒有「穿越機率」這種量，實際規範/量測的是「洩漏率」這種
+    // 連續物理量，這裡改用孔口流量公式(orifice flow equation)：
+    //   Q_leak(m³/s) = Cd × A_leak × sqrt(2·ΔP / ρ_air)
+    // Cd為孔口流量係数，A_leak為等效洩漏面積(m²)，ΔP為門兩側壓差(Pa)，
+    // ρ_air為空氣密度(沿用上方AIR_DENSITY_KG_M3)。實際套用方式見
+    // DoorLeakageModel.java。
+
+    /**
+     * 孔口流量係数 Cd，無因次。
+     * 取ASHRAE Fundamentals對「銳緣孔口(sharp-edged orifice)」的慣用值，
+     * 消防/HVAC洩漏計算(建築氣密性/ELA換算、NFPA 92煙控系統設計等)常見引用
+     * 範圍0.6~0.65，這裡取中段值0.62。門縫並非理想銳緣孔口，實際Cd會依縫隙
+     * 幾何形狀略有差異，這裡取常見量級，非針對特定門縫形狀實測校準。
+     */
+    static final double DISCHARGE_COEFFICIENT_CD = 0.62;
+
+    /**
+     * 通過認證的「smoke-and-draft-control door」(對應本專案「防火門」關閉
+     * 狀態)洩漏率上限，單位 m³/(s·m²)(以門面積計)。
+     * 來源：UL 1784《Air Leakage Tests of Door Assemblies》+ NFPA 105 +
+     * IBC 710.5.2.2，規範上限為3.0 cfm/ft² ≈ 0.01524 m³/(s·m²)，量測條件為
+     * FIREDOOR_TEST_PRESSURE_PA(0.10 in w.g. ≈ 24.9 Pa)。這是「認證門洩漏率」
+     * 的規範上限值，不是機率，也不是每一款防火門實測的平均值——實際產品
+     * 通常要優於此上限才能過認證，這裡取規範允許的上限當保守估計。
+     */
+    static final double FIREDOOR_LEAKAGE_RATE_M3_PER_S_M2 = 0.01524;
+
+    /** UL 1784測試壓差，0.10 in w.g. ≈ 24.9 Pa，用來反推防火門的等效洩漏面積。 */
+    static final double FIREDOOR_TEST_PRESSURE_PA = 24.9;
+
+    /**
+     * 單一門扇的參考面積，取常見單開門(single-leaf door)量級：寬0.9m×高2.0m
+     * = 1.8 m²(建築規範/門窗產業常見的標準單開門尺寸量級，非特定產品規格)。
+     * 用來把FIREDOOR_LEAKAGE_RATE_M3_PER_S_M2(以門面積為基準的洩漏率)換算
+     * 回實際的等效洩漏面積(A_leak)，也做為NORMALDOOR_LEAKAGE_AREA_M2門縫
+     * 周長估算的基礎(見下)。
+     */
+    static final double DOOR_LEAF_AREA_M2 = 1.8;
+
+    /**
+     * 一般(無認證)門縫的縫隙寬度量級，取3~5mm常見引用範圍的中間值。
+     * ⚠️量級估計，非直接引用單一門實測值：一般門沒有對應法規門檻，這裡
+     * 借用建築氣密性文獻的等效洩漏面積(Effective Leakage Area, ELA)概念
+     * (ASHRAE Fundamentals、Sherman-Grimsrud模型)取量級參考，但那些文獻的
+     * ELA通常是「整棟建築」的加總值，不能直接套用在單一門縫上，因此這裡
+     * 改用「門縫周長 × 常見縫隙寬度」的量級換算(見NORMALDOOR_LEAKAGE_AREA_M2)。
+     */
+    static final double NORMALDOOR_GAP_WIDTH_M = 0.004; // 3~5mm量級中間值
+
+    /**
+     * 一般(無認證)門的等效洩漏面積(m²) = 門扇周長 × 縫隙寬度。
+     * 周長取DOOR_LEAF_AREA_M2(0.9m×2.0m)的周長 2×(0.9+2.0)=5.8m，
+     * 乘上NORMALDOOR_GAP_WIDTH_M(4mm)，得到5.8×0.004≈0.0232 m²。
+     * ⚠️這是量級估計，非直接引用單一門實測值，未來有更精確數據應更新。
+     */
+    static final double NORMALDOOR_LEAKAGE_AREA_M2 =
+        2.0 * (0.9 + 2.0) * NORMALDOOR_GAP_WIDTH_M;
+
+    /**
+     * 防火門(關閉狀態)的等效洩漏面積(m²)，由FIREDOOR_LEAKAGE_RATE_M3_PER_S_M2
+     * + FIREDOOR_TEST_PRESSURE_PA，透過孔口公式反推：
+     *   Q_test(m³/s) = FIREDOOR_LEAKAGE_RATE_M3_PER_S_M2 × DOOR_LEAF_AREA_M2
+     *   Q_test = A_leak × sqrt(2×FIREDOOR_TEST_PRESSURE_PA / ρ_air)
+     *   ⇒ A_leak = Q_test / sqrt(2×FIREDOOR_TEST_PRESSURE_PA / ρ_air)
+     *
+     * 【推導/使用上的重要澄清，誠實記錄】上式刻意不除以Cd：Q_test是UL1784
+     * 測試量到的「實際通過流量」，已經內含測試當下門縫的真實流出行為，這裡
+     * 反推出來的A_leak本質上已經吸收了測試當下的Cd效應。但DoorLeakageModel
+     * 實際計算Q_leak時，為了讓防火門/一般門共用同一個孔口公式(而不是防火門
+     * 一套公式、一般門另一套)，仍然會對這個A_leak再乘一次
+     * DISCHARGE_COEFFICIENT_CD，這在嚴謹意義上是重複套用了一次Cd，會讓防火
+     * 門在同一個測試壓差下算出的Q_leak比原始規範值再打約Cd倍折扣(≈6折)。
+     * 這裡刻意保留這個重複折扣，原因：(1)方向是保守的——讓防火門洩漏量
+     * 更低，更符合「防火門應該更密閉」的物理直覺，不會讓防火門洩漏比規範
+     * 上限值還誇張；(2)避免另外維護「防火門不乘Cd、一般門要乘Cd」兩套不同
+     * 公式，用同一個孔口流量函式處理兩種門，程式碼更不容易出錯。未來若要
+     * 精確對齊規範值，只需要把DoorLeakageModel對防火門那條路徑的Cd改成
+     * 1.0即可，這裡誠實記錄這個已知的簡化，不包裝成精確反推值。
+     */
+    static final double FIREDOOR_LEAKAGE_AREA_M2 =
+        (FIREDOOR_LEAKAGE_RATE_M3_PER_S_M2 * DOOR_LEAF_AREA_M2)
+        / Math.sqrt(2.0 * FIREDOOR_TEST_PRESSURE_PA / AIR_DENSITY_KG_M3);
+
+    /**
+     * 「完全開放通道」的參考截面積(m²)，用來把Q_leak(門縫的物理洩漏量)換算
+     * 成一個「相對於完全暢通時能有多開」的連續比例(0~1)，供既有的Fick's Law
+     * 擴散架構直接用倍率取代原本「開/關」二元判定，不需要额外處理壓力場
+     * 的絕對單位換算。取一個block的平面寬度(BLOCK_METERS) × 樓層淨高
+     * (FLOOR_HEIGHT_METERS)，對應本模擬既有「格與格之間，若中間沒有門/牆
+     * 完全阻隔，就視為完全暢通」假設下隱含的截面積量級。
+     * ⚠️這是簡化：真實開口大小應依實際門/開口幾何決定，這裡用單一block的
+     * 截面積作為模擬既有grid結構下的合理近似，非精確量測值。
+     */
+    static final double FULL_OPENING_REFERENCE_AREA_M2 = BLOCK_METERS * FLOOR_HEIGHT_METERS;
+
+    /**
+     * 門縫滲漏相對於「完全暢通通道」的連續流量比例(0~1)：
+     *   factor = (Cd × A_leak) / A_full_opening
+     * 在「兩側都用同一個固定測試壓差ΔP」的簡化假設下(見DoorLeakageModel類
+     * 註解)，ΔP項在比例中會相除抵消，因此不需要動態壓力場也能得到一個有
+     * 物理意義、且跟ΔP大小無關的固定比例常數，只反映「洩漏面積相對於完全
+     * 開口面積」的縮小倍率。
+     * ⚠️簡化假設：真實情況下ΔP會隨火場發展動態變化(§10尚未有完整動態壓力
+     * 場)，這裡先用固定測試壓差(FIREDOOR_TEST_PRESSURE_PA)作為簡化保守假設，
+     * 非逐tick真正重算的動態壓力場。
+     */
+    static final double FIREDOOR_LEAKAGE_FACTOR =
+        (DISCHARGE_COEFFICIENT_CD * FIREDOOR_LEAKAGE_AREA_M2) / FULL_OPENING_REFERENCE_AREA_M2;
+    static final double NORMALDOOR_LEAKAGE_FACTOR =
+        (DISCHARGE_COEFFICIENT_CD * NORMALDOOR_LEAKAGE_AREA_M2) / FULL_OPENING_REFERENCE_AREA_M2;
 }

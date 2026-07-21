@@ -34,6 +34,13 @@ class People {
     int speedStage;
     double fedCO = 0.0;
     double fedThermal = 0.0; // 熱暴露累積劑量(Purser耐受時間模型，見PhysicalConstants§5b)，達到FED_THERMAL_LETHAL視為燒死
+    // 【校正清單問題1】心肺負荷係數：易感族群(幼童/行動不便/年長者)死亡時
+    // 實測%COHb往往偏低，文獻上的機制不是「血液生化致死閾值比較低」，而是
+    // 心肺儲備不足、單位體重換氣量較高，導致同樣暴露下CO吸收/FED累積更快。
+    // 取代原本把易感度直接編碼進coSusceptibilityD(讓D值本身隨族群調低)的做法，
+    // 改成讓D值統一落在健康成年人量級，另外用這個係數放大absorbCO()裡的
+    // %COHb增量，機制上更貼近文獻，見absorbCO()。
+    double coCardiopulmonaryLoadFactor = 1.0;
     double coSusceptibilityD;
 
     // 【降低耦合】共用的 Random 與少數幾個逃生策略需要的常數，原本是 private，
@@ -80,7 +87,15 @@ class People {
     // 系統示警)才會進入逃生狀態；尚未察覺前，這個tick停留原地不動。
     boolean aware = false;
     Integer firstCueAt = null;
-    private static final double AWARENESS_SMOKE_THRESHOLD = 0.05; // 「聞到煙味」門檻，比對Obj.smell欄位(不是smoke)
+    // 「聞到煙味」門檻，比對Obj.smell欄位(不是smoke)。
+    // 【校正清單§14】Obj.smell的產生/擴散已改成EnvironmentSimulator+
+    // DoorLeakageModel的孔口流量連續穿越量(取代原本的SMELL_SPREAD_PROB_*
+    // 機率常數)；「這個濃度算不算聞得到」的判定就是這裡的AWARENESS_SMOKE_THRESHOLD，
+    // 不再是擴散階段的獨立機率事件。⚠️無文獻對應：0.05這個具體門檻值，在目前
+    // 搜尋範圍內找不到可直接引用的人體嗅覺/煙霧偵測濃度閾值文獻(smell本身是
+    // 0~1的無因次「察覺代理量」，不是ppm或mg/m³等有標準單位的實測濃度，難以
+    // 直接對應ISO/消防偵煙器規範的濃度閾值)，純屬簡化假設，非人體嗅覺實測值。
+    private static final double AWARENESS_SMOKE_THRESHOLD = 0.05;
 
     // ─── 同樓層路網分岔點任務 ──────────────────────────────
     // targetStage(見上方宣告)沿用於「跨樓層」任務：指派後延到下個tick開頭才真正跨過去。
@@ -113,20 +128,26 @@ class People {
         // PhysicalConstants.STAIR_SPEED_FACTOR算出，站在樓梯間(Stage)格時使用
         // (見currentSpeed())，取代原本「單一speed被誤用成全域速度、實際上比較
         // 像樓梯速度」的問題。
-        // 【校正清單§5】coSusceptibilityD是個人達到失能/致死所需的%COHb臨界值，
-        // 沿用原本coThreshold(25/20/15/12)的相對比例，改用%COHb常見的臨界範圍
-        // (健康成年人約30~50%)重新標定量級，只反映個人體質。
+        // 【修正，校正清單問題1】coSusceptibilityD是個人達到失能/致死所需的
+        // %COHb臨界值，統一取健康成年人量級(40，落在文獻常見30~50%範圍)，
+        // 不再依族群調低——致死血中濃度本身不因族群而異，真正造成易感族群
+        // 提早失能/死亡的是心肺負荷更重、吸收更快，這部分改用
+        // coCardiopulmonaryLoadFactor放大absorbCO()裡的%COHb增量(見該方法)，
+        // 讓FED累積速度變快，而不是動閾值本身。係數量級沿用原本D值的相對
+        // 比例反推(40/原D)，數值上與校正前相近，但機制解讀正確。
         switch (profile) {
             case NORMAL_SOLO:
             case STAFF:
             case CUSTOMER:
                 this.speedFloor = 3;      // 1.2 m/s，落在SFPE/Fruin(1971)保守設計值下緣 ✅
                 this.coSusceptibilityD = 40.0; // 健康成年人耐受度高
+                this.coCardiopulmonaryLoadFactor = 1.0; // 無額外負荷
                 panicSusceptibility = 0.3;
                 break;
             case WITH_CHILD:
                 this.speedFloor = 2;      // 0.8 m/s，落在Proulx家庭群體疏散速度0.6–1.1 m/s區間 ✅
-                this.coSusceptibilityD = 32.0; // 幼童較脆弱，整體耐受度下降
+                this.coSusceptibilityD = 40.0;
+                this.coCardiopulmonaryLoadFactor = 1.25; // 幼童單位體重換氣量較高，吸收較快
                 panicSusceptibility = 0.6;
                 break;
             case IMPAIRED:
@@ -134,7 +155,8 @@ class People {
                 // 上調到2 block/tick(0.8 m/s)較貼近文獻(0.5–0.9 m/s)；樓梯速度另外用
                 // STAIR_SPEED_FACTOR折算，不再讓平面速度被誤當樓梯速度使用。
                 this.speedFloor = 2;
-                this.coSusceptibilityD = 24.0; // 耐受度較低
+                this.coSusceptibilityD = 40.0;
+                this.coCardiopulmonaryLoadFactor = 1.67; // 心肺儲備不足，FED累積較快
                 panicSusceptibility = 0.8;
                 break;
             case ELDERLY:
@@ -142,12 +164,14 @@ class People {
                 // 平面速度上調到2 block/tick(0.8 m/s)，對上Fujiyama & Tyler(2004)
                 // 文獻下緣(0.8–1.0 m/s)，樓梯速度另外用STAIR_SPEED_FACTOR折算。
                 this.speedFloor = 2;
-                this.coSusceptibilityD = 19.0; // 身體最脆弱，致死閾值最低
+                this.coSusceptibilityD = 40.0;
+                this.coCardiopulmonaryLoadFactor = 2.1; // 心肺儲備最弱，FED累積最快
                 panicSusceptibility = 0.7;
                 break;
             default:
                 this.speedFloor = 3;
                 this.coSusceptibilityD = 40.0;
+                this.coCardiopulmonaryLoadFactor = 1.0;
                 panicSusceptibility = 0.3;
                 break;
         }
@@ -380,7 +404,7 @@ class People {
     // 回傳true代表成功規劃出新任務(可能是跨樓層的下一個樓梯間，也可能是同樓層的下一個
     // 分岔格/本層樓梯間/出口)；回傳false代表目前完全找不到任何可走的方向(受困)。
     boolean planNextAdvice(int currentTick) {
-        List<int[]> path = routeFinder.computeSmartPath(z, y, x, profile);
+        List<int[]> path = routeFinder.computeSmartPath(z, y, x, profile, currentTick);
         if (path == null || path.size() < 2) return false;
 
         int idx = routeFinder.findDecisionPointIndex(path);
@@ -479,8 +503,9 @@ class People {
     // ─── 【校正清單§5】CO吸入劑量：Purser FED_CO模型 ─────────────────────
     // 用當下所在位置的CO濃度(ppm，見EnvironmentSimulator生成/擴散的coPpm欄位)
     // 搭配呼吸每分鐘通氣量(RMV，隨恐慌程度在輕度活動~劇烈活動間內插)，依Purser
-    // 公式換算成本tick的%COHb增量，除以個人易感度(coSusceptibilityD，即這個人
-    // 達到失能/致死所需的%COHb臨界值)得到FED增量，累加進fedCO。
+    // 公式換算成本tick的%COHb增量(乘上coCardiopulmonaryLoadFactor反映易感族群
+    // 吸收較快)，除以個人易感度(coSusceptibilityD，統一取健康成年人量級，
+    // 只代表致死血中濃度本身，見校正清單問題1)得到FED增量，累加進fedCO。
     // 起火原因對CO毒性的影響已經改成掛在EnvironmentSimulator生成coPpm的速率上
     // (FireCause.representativeFuel + FireChemistry)，這裡不再需要另外查詢
     // context——原本的effectiveCoThreshold()/smokeToleranceFactor()依賴因此
@@ -495,7 +520,8 @@ class People {
 
         double cohbIncrement = PhysicalConstants.FED_CO_CONST
             * Math.pow(coPpm, PhysicalConstants.FED_CO_EXPONENT)
-            * rmv * dtMinutes;
+            * rmv * dtMinutes
+            * coCardiopulmonaryLoadFactor; // 【校正清單問題1】易感族群心肺負荷較重，同樣暴露下累積較快
 
         fedCO += cohbIncrement / coSusceptibilityD;
     }
@@ -510,8 +536,18 @@ class People {
         double tempC = space.building[z][y][x].tempC;
         if (tempC <= PhysicalConstants.AMBIENT_TEMP_C) return;
 
-        double toleranceMinutes = Math.exp(PhysicalConstants.FED_THERMAL_TOLERANCE_A
-            - PhysicalConstants.FED_THERMAL_TOLERANCE_B * tempC);
+        // 【修正，校正清單問題4】公式只在80~150°C範圍內有實證支持；超過
+        // THERMAL_TOLERANCE_EXTRAPOLATION_CAP_C(200°C)後不再讓指數公式繼續外推，
+        // 改用THERMAL_TOLERANCE_FLOOR_MINUTES(公式在截斷溫度時的值)當耐受時間
+        // 下限，代表「近乎瞬間失能/致死」，數值量級跟外推結果相近，但不再依賴
+        // 驗證範圍外一個數量級以上的數學外推。
+        double toleranceMinutes;
+        if (tempC >= PhysicalConstants.THERMAL_TOLERANCE_EXTRAPOLATION_CAP_C) {
+            toleranceMinutes = PhysicalConstants.THERMAL_TOLERANCE_FLOOR_MINUTES;
+        } else {
+            toleranceMinutes = Math.exp(PhysicalConstants.FED_THERMAL_TOLERANCE_A
+                - PhysicalConstants.FED_THERMAL_TOLERANCE_B * tempC);
+        }
         double dtMinutes = PhysicalConstants.TICK_SECONDS / 60.0;
 
         fedThermal += dtMinutes / toleranceMinutes;

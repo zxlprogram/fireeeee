@@ -42,6 +42,9 @@ class ConsoleMapPrinter {
                     }
                     else if (cell instanceof Stage)      sb.append("🪜");
                     else if (cell instanceof Wall)       sb.append("🧱");
+                    // 【新增】還沒著火、但鋪有可燃物的樓地板格，用木材符號標示，
+                    // 讓「可燃物隨機分布」的結果能在地圖上直接看出來(見WorldObjects.Obj.fuel)。
+                    else if (cell.fuel != null)          sb.append("🪵");
                     else                                 sb.append("⬜");
                 }
                 System.out.println(sb);

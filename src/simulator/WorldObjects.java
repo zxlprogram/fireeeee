@@ -36,6 +36,18 @@ class Obj {
     // People.absorbCO()用它搭配呼吸每分鐘通氣量(RMV)算Purser FED_CO劑量。
     double coPpm = 0.0;
 
+    // 【新增，回應審查意見：CO濃度判定應採暴露時間累積(FED)而非瞬時IDLH門檻】
+    // 這一格的「假設從有CO開始就有一名代表性(輕度活動)occupant持續待在這裡」
+    // 所累積的Purser FED_CO劑量(無因次)。跟People.fedCO是同一套Purser公式，
+    // 差別只在於RMV固定用RMV_LIGHT_ACTIVITY(代表性/保守假設，不隨個別人的
+    // 恐慌程度內插)——因為這個欄位服務的是「這個位置本身的環境危害有多嚴重」
+    // (ASET/untenable判定，見EnvironmentSimulator.untenableByFourCriteria())，
+    // 不是特定某個人的個別暴露史；個別人員的實際致死判定仍然是People.fedCO
+    // (見People.checkStatus())，兩者不互相取代。單調遞增、不因CO濃度下降而
+    // 回復，跟FED劑量模型「累積、不可逆」的物理意義一致。由
+    // EnvironmentSimulator.spread()在每個tick更新coPpm之後才更新。
+    double fedCoCell = 0.0;
+
     // 【新增，校正清單§10/§11】這一格的氣體溫度(°C)，預設為常溫
     // PhysicalConstants.AMBIENT_TEMP_C。由EnvironmentSimulator依火源格的
     // 對流HRR用「控制體積絕熱升溫」公式生成，並用跟smoke一樣的距離衰減方式
@@ -55,6 +67,23 @@ class Obj {
             * (Math.pow(tKelvin, 4) - Math.pow(ambientKelvin, 4));
         return Math.max(0.0, qWattsM2) / 1000.0; // W/m² -> kW/m²
     }
+
+    // 【新增，回應「可燃物隨機分布」需求】這一格鋪設的可燃物種類，null代表這一格
+    // 沒有可燃物(空地/淨空區域)。由BuildingGenerator.distributeFuelLoads()在建築
+    // 生成階段隨機分布到部分Floor格(有些地方分布，有些地方沒分布，見該方法註解)，
+    // 只有Floor會被指派非null值，Wall/Door/Exit/Stage維持null當保底。
+    //
+    // 兩個用途：
+    //   1) 【影響燃燒/煙霧/CO排放】EnvironmentSimulator.spread()在這一格真正著火
+    //      (fire=true)時，優先用這一格自己的fuel(而不是起火原因對應的全域
+    //      representativeFuel)算HRR→質量損失率→CO/煙塵生成率(見FireChemistry)，
+    //      讓「這裡到底鋪了什麼可燃物」直接反映在這一格實際排放的CO/煙霧量上；
+    //      沒有可燃物的格子退回用起火原因的代表性燃料(維持原本行為)。
+    //   2) 【燃點觸發點燃】EnvironmentSimulator.igniteByTemperature()每個tick在
+    //      溫度場算完之後，檢查這一格(還沒著火、且有可燃物)的tempC有沒有達到
+    //      fuel.ignitionTempC，達到就獨立點燃，不必等鄰接火源直接燒過來
+    //      (原本的機率式鄰接延燒spread()仍照舊保留，兩種點燃途徑並存)。
+    FuelType fuel = null;
 
     // 【新增，校正清單§1/§12】本tick這一格(僅Door/Exit有意義)剩餘可通行人數，
     // 由DoorFlowModel每tick重置/消耗，近似「門/出口通過流量上限」造成的瓶頸排隊。
