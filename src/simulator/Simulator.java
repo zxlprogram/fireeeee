@@ -76,6 +76,8 @@ public class Simulator implements SimulationContext {
         for (SimMode m : SimMode.values()) statsByMode.put(m, new ModeStats());
     }
 
+	public boolean sessionOutput;
+
     // ═══════════════════════════════════════════════════════════════════════
     // SimulationContext 實作：People / RouteFinder 對 Simulator 唯一允許的窗口
     // ═══════════════════════════════════════════════════════════════════════
@@ -185,11 +187,14 @@ public class Simulator implements SimulationContext {
 
             // 記錄本tick快照(在removeAll之前呼叫，讓這個tick剛死亡/逃脫的人員
             // 也能以最終狀態被記錄進這一格timeline，而不是直接消失不留下最後一筆資料)
+            if(sessionOutput)
             sessionExporter.recordTick(tick, space, peopleList, detectors);
 
             peopleList.removeAll(removed);
             ConsoleMapPrinter.print(space, tick, peopleList);
-        } while (!EnvironmentSimulator.allFloorsOnFire(space));
+        } while (!(EnvironmentSimulator.allOccupiableCellsUntenable(space) 
+        	      && peopleList.isEmpty())
+        	      && !EnvironmentSimulator.allFloorsOnFire(space));
 
         // 迴圈跑完後，還留在 peopleList 裡的人代表模擬結束時他們既沒逃出去也沒死(TRAPPED)
         for (People p : peopleList) {
@@ -287,7 +292,8 @@ public class Simulator implements SimulationContext {
         System.err.println("Mode: " + mode + ", total: " + totalPeople + ", survive: " + survive);
 
         // 匯出本場模擬的 Session JSON(靜態地圖/逐tick快照/事件日誌)
-        //sessionExporter.exportToFile(sessionJsonFilename);
+        if(sessionOutput)
+        sessionExporter.exportToFile(sessionJsonFilename);
 
         return result;
     }
