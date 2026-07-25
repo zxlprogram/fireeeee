@@ -59,11 +59,14 @@
 > 以下為執行流程範例，實際指令請依專案實作環境調整。
 
 ```bash
-# 安裝相依套件
-npm install
+# 下載內容
+git clone https://github.com/zxlprogram/fireeeee.git
 
-# 執行模擬（DEFAULT / SMART / HYBRID 三模式將依序完整跑一次）
-npm run simulate
+# 進入資料夾
+cd zxlprogram/fireeeee/bin
+
+# 執行程式
+java simulator.sim
 
 # 模擬結束後於輸出目錄取得 [SceneName]_session.json
 # 可用於前端 3D 渲染器回放，格式詳見 docs/07-json-schema.md

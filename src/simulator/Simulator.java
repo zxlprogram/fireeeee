@@ -194,7 +194,7 @@ public class Simulator implements SimulationContext {
             ConsoleMapPrinter.print(space, tick, peopleList);
         } while (!(EnvironmentSimulator.allOccupiableCellsUntenable(space) 
         	      && peopleList.isEmpty())
-        	      && !EnvironmentSimulator.allFloorsOnFire(space));
+        	      && !EnvironmentSimulator.allFloorsOnFire(space) || !peopleList.isEmpty());
 
         // 迴圈跑完後，還留在 peopleList 裡的人代表模擬結束時他們既沒逃出去也沒死(TRAPPED)
         for (People p : peopleList) {
@@ -417,7 +417,9 @@ public class Simulator implements SimulationContext {
     //   cause  ─ 這個自訂房型要模擬的起火原因(對應原本Data.cause)
     //   count  ─ 這個房型要重抽幾組不同的起火點+人物配置來跑(對應原本work()的count)
     // ═══════════════════════════════════════════════════════════════════════
-    public void workCustomRoom(String[][][] layout, FireCause cause, int count) {
+    public void workCustomRoom(String file, FireCause cause, int count) {
+    	
+    	String[][][] layout=CustomRoomTextLoader.loadFromFile(file);
         TotalPeopleSum = 0;
 
         long buildingStartNano = System.nanoTime();
@@ -448,11 +450,6 @@ public class Simulator implements SimulationContext {
         System.err.printf("執行時間: %.3f ms，體積: %d，時間複雜度量測(ms ÷ (count×體積)) : %.10f ms/unit\n",
             buildingElapsedMs, buildingVolume, msPerUnit);
         // 註：TotalPeopleSum在runScenariosForBuilding()內已經逐場景累加完成，這裡不需要再處理。
-    }
-
-    // 單層房型的便利多載：包成 height=1 的三維陣列後直接呼叫上面那個。
-    public void workCustomRoom(String[][] singleFloorLayout, FireCause cause, int count) {
-        workCustomRoom(new String[][][]{ singleFloorLayout }, cause, count);
     }
 
     // ─── work(Data[],int) 與 workCustomRoom(...) 共用：同一棟建築(baseBuilding
