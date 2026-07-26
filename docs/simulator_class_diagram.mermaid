@@ -1,0 +1,134 @@
+classDiagram
+    %% ===== 核心控制 =====
+    class Simulator {
+        +work(Data[], count)
+        +workCustomRoom(...)
+        -runScenariosForBuilding()
+    }
+    class SimulationContext {
+        <<interface>>
+        +getDetectors()
+        +findPersonById(id)
+        +isSystemAlertTriggered(tick)
+        +countNearbyPeopleOnFloor()
+    }
+    Simulator ..|> SimulationContext
+
+    %% ===== 逃生策略 (Strategy Pattern) =====
+    class EscapeStrategy {
+        <<interface>>
+        +escape(People, tick)
+    }
+    class DefaultEscapeStrategy
+    class SmartEscapeStrategy
+    DefaultEscapeStrategy ..|> EscapeStrategy
+    SmartEscapeStrategy ..|> EscapeStrategy
+    People --> EscapeStrategy : uses
+
+    %% ===== 人員與行為 =====
+    class People {
+        +escape(tick)
+        -status
+    }
+    class PanicModel
+    class VisionSystem
+    class RouteFinder
+    class PersonKpi
+    class DeathCause
+    class DeviceStatus
+    People --> PanicModel
+    People --> VisionSystem
+    People --> RouteFinder
+    People --> PersonKpi
+    People --> DeathCause
+    People --> DeviceStatus
+    RouteFinder --> VisionSystem
+    RouteFinder --> GridKeys
+
+    %% ===== 環境 / 火災物理 =====
+    class EnvironmentSimulator {
+        +spreadEnvironment()
+    }
+    class FireChemistry
+    class FireCause
+    class FuelType
+    class PhysicalConstants
+    class DoorFlowModel
+    class DoorLeakageModel
+    class VentilationProfile
+    EnvironmentSimulator --> FireChemistry
+    EnvironmentSimulator --> FuelType
+    EnvironmentSimulator --> DoorLeakageModel
+    EnvironmentSimulator --> VentilationProfile
+    EnvironmentSimulator --> PhysicalConstants
+    FireChemistry --> FuelType
+    FireChemistry --> FireCause
+    DoorFlowModel --> PhysicalConstants
+    DoorLeakageModel --> PhysicalConstants
+    VentilationProfile --> PhysicalConstants
+    People --> DoorFlowModel
+    People --> EnvironmentSimulator
+
+    %% ===== 世界物件 / 空間 =====
+    class Obj
+    class Door
+    class Stage
+    class Space
+    class GridKeys
+    class Detector
+    Door --|> Obj
+    Stage --|> Obj
+    Space --> Obj
+    Space --> EnvironmentSimulator
+    Detector --> Obj
+
+    %% ===== 場景生成 / 資料 =====
+    class BuildingGenerator
+    class CustomRoomParser
+    class CustomRoomTextLoader
+    class ScenarioInitializer
+    class Data
+    class Range
+    class SimMode
+    class ConsoleMapPrinter
+    BuildingGenerator --> Obj
+    BuildingGenerator --> FuelType
+    CustomRoomParser --> BuildingGenerator
+    CustomRoomParser --> ConsoleMapPrinter
+    CustomRoomTextLoader --> CustomRoomParser
+    ScenarioInitializer --> Detector
+    ScenarioInitializer --> People
+    Data --> Range
+    Data --> FireCause
+
+    %% ===== 結果統計 / 匯出 =====
+    class SimResult
+    class ModeStats
+    class Outcome
+    class ReportGenerator
+    class SessionExporter
+    SimResult --> DeathCause
+    SimResult --> Outcome
+    SimResult --> People
+    ReportGenerator --> ModeStats
+    ReportGenerator --> SimMode
+    SessionExporter --> Detector
+    SessionExporter --> Obj
+
+    %% ===== Simulator 統籌所有子系統 =====
+    Simulator --> BuildingGenerator
+    Simulator --> EnvironmentSimulator
+    Simulator --> CustomRoomParser
+    Simulator --> ScenarioInitializer
+    Simulator --> Data
+    Simulator --> SimMode
+    Simulator --> SimResult
+    Simulator --> ModeStats
+    Simulator --> ReportGenerator
+    Simulator --> SessionExporter
+    Simulator --> RouteFinder
+    Simulator --> DefaultEscapeStrategy
+    Simulator --> SmartEscapeStrategy
+    Simulator --> People
+    Simulator --> Space
+    Simulator --> Detector
