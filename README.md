@@ -85,10 +85,12 @@ java simulator.sim
 
 | 資料夾/檔案 | 功能 |
 | --- | --- |
-| docs/README.md | 存放工程文件,描述專案的結構、流程等 |
+| docs,README.md | 存放工程文件,描述專案的結構、流程等 |
 | report | 存放原始模擬數據與其分析和總結 |
 | src | 程式源碼 |
 | bin | 編譯後多個可執行的檔案 |
-| .setting/.classpath/.project | 開發環境相關的設置，與eclipse基本設置方式相同 |
+| .setting,.classpath,.project | 開發環境相關的設置，與eclipse基本設置方式相同 |
 | .gitignore | 紀錄運行時應輸出但不上傳至專案的檔案 |
 | simulation_report.txt | 測試構思想法的輸出資料，將一網格單位的面積從0.16平方公尺改為一坪後測試大廈樓型得出的報表，這個構想因建築難以調適，目前處於半廢置的情形 |
+
+---
