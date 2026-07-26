@@ -52,7 +52,7 @@
 | [docs/07-json-schema.md](docs/07-json-schema.md) | 軌跡檔（SessionExporter）JSON 格式 Schema 定義 |
 | [docs/references.md](docs/references.md) | 參考文獻與標準（NFPA/SFPE、ISO 13571、Purser、Weibull 等） |
 | [docs/專案架構圖.svg](docs/專案架構圖.svg) | 專案架構圖 |
-
+| [docs/simulator_class_diagram.mermaid](docs/simulator_class_diagram.mermaid) | 類別架構圖 |
 ---
 
 ## 如何執行 (How to Run)
